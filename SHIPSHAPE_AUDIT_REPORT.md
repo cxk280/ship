@@ -455,7 +455,7 @@ Coverage gaps and weak signals:
 - Change the root `test` script to run API and web unit tests, with a separate explicit command for full E2E.
 - Add a documented test database setup path, for example `DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_test` plus migration/reset guidance.
 - Consider a lighter E2E smoke subset for regular local/CI gating, reserving the 869-test browser suite for scheduled or pre-release runs.
-- For exceeding the benchmark later: target **100% green API and web unit tests from the root command**, plus a working coverage report with enforced thresholds.
+- For exceeding the benchmark later: target **100% green API and web unit tests from the root command**, plus working API/Web coverage reports with enforced thresholds, including **80% coverage on changed files**.
 
 ## Category 6: Runtime Error and Edge Case Handling
 

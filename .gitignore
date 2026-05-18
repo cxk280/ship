@@ -63,6 +63,7 @@ test-results/
 
 # Audit artifacts
 .audit
+ShipShape_Demo_Deck.pptx
 
 # Terraform
 terraform/.terraform/
