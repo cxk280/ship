@@ -220,6 +220,7 @@ Patterns observed:
 - API uses Vitest with Node environment.
 - Web uses Vitest with jsdom.
 - API route/service tests live near implementation files.
+- The root `test` script currently runs API Vitest only: `pnpm --filter @ship/api test`.
 
 ### E2E Tests
 
@@ -232,7 +233,13 @@ Playwright config uses testcontainers:
 - worker count is memory-aware,
 - retries are enabled for local/CI flakiness handling.
 
-Important operational note: docs warn against direct noisy E2E execution in agent contexts. For this assignment, we should still collect test baselines, but with controlled workers and captured output.
+Test database lifecycle:
+
+- Playwright workers create isolated PostgreSQL containers through testcontainers.
+- Each worker gets a seeded API/web stack, then tears down its own containers after the worker run.
+- API Vitest expects a reachable `DATABASE_URL`; the later audit found the local default path is fragile when Postgres is not on the expected port.
+
+Important operational note: docs warn against direct noisy E2E execution in agent contexts. For this assignment, we should still collect test baselines, but with controlled workers and captured output. The later audit captured the actual test inventory and runtime status.
 
 ## 8. Build And Deploy
 
@@ -248,6 +255,7 @@ Important operational note: docs warn against direct noisy E2E execution in agen
 - API starts by running migrations, then `dist/index.js`.
 - Terraform manages AWS infrastructure.
 - The current Terraform docs describe separate environment patterns, modules, CloudFront/S3 frontend, Elastic Beanstalk API, Aurora/Postgres, SSM, security groups, WAF, and CloudFront WebSocket routing.
+- No GitHub Actions workflow or `.gitlab-ci.yml` pipeline is present in the repository. CI/CD appears to be defined through deployment scripts/docs and manual or external GitLab/GitHub configuration, not checked-in workflow files.
 
 ## 9. Architecture Assessment
 
@@ -283,3 +291,65 @@ These are good candidates for the required “3 things learned” deliverable:
 2. Yjs state plus TipTap JSON backup in one unified `documents` row.
 3. Playwright worker isolation with one Postgres container/API server/web preview per worker.
 
+## 11. Codebase Orientation Checklist Coverage
+
+This section maps the Appendix checklist from `GFA Week 4 - ShipShape.pdf` to the orientation notes so the required coverage is explicit.
+
+### Phase 1: First Contact
+
+- Repository setup was recorded in [Local Setup Notes](#local-setup-notes), including the `pnpm`/Corepack issue, `shared` build prerequisite, successful type-check, and successful web build.
+- Documentation review is summarized in [Documentation Reviewed](#documentation-reviewed), including architecture, unified document model, workflow, testing, and deployment docs.
+- The `shared/` package is summarized in [Package Relationship](#package-relationship), [TypeScript Patterns](#6-typescript-patterns), and the data model sections. It exports shared domain/API types consumed by both `api` and `web`.
+- The `web/`, `api/`, and `shared/` package relationship is diagrammed in [Package Relationship](#package-relationship).
+
+### Phase 1: Data Model
+
+- Database schema and major table relationships are mapped in [Core Tables](#core-tables) and [Relationship Model](#relationship-model).
+- The unified document model is explained in [Unified Document Model](#unified-document-model): docs, issues, projects, weeks/sprints, people, plans, retros, standups, and reviews share the `documents` table.
+- `document_type` is the discriminator for document behavior and query filtering. It appears in the `documents` table and is used by routes and queries to separate wiki, issue, project, week, person, and other document classes.
+- Document relationships are covered in [Relationship Model](#relationship-model): `parent_id`, `document_associations`, `document_links`, and frontend/API `belongs_to` shapes.
+
+### Phase 1: Request Flow
+
+- The traced user action is [Request Flow: Creating An Issue](#3-request-flow-creating-an-issue).
+- API middleware is summarized in [Middleware Chain](#middleware-chain).
+- Authentication behavior is summarized in [Auth Modes](#auth-modes): bearer tokens are checked before cookie sessions, expired sessions are deleted, and unauthenticated protected requests fail before route logic.
+
+### Phase 2: Real-Time Collaboration
+
+- WebSocket establishment is covered in [Real-Time Collaboration](#5-real-time-collaboration): the server validates sessions from cookies, checks document visibility, and joins `type:uuid` rooms.
+- Yjs synchronization is covered in the server/client collaboration sections: clients use `Y.Doc`, `IndexeddbPersistence`, and `WebsocketProvider`; the server tracks one in-memory `Y.Doc` per room.
+- Concurrent edits are reconciled by Yjs CRDT updates for editor content. Scalar metadata, such as titles, remains server-authoritative and was later audited as last-write-wins without conflict feedback.
+- Yjs persistence is covered in [Server](#server): debounced updates write `documents.yjs_state`, a TipTap JSON `content` backup, selected extracted `properties`, and throttled `document_history`.
+
+### Phase 2: TypeScript Patterns
+
+- TypeScript version: `^5.7.2` in root, `api`, `web`, and `shared` package manifests.
+- Strict mode is on in the root, web, API, and shared TypeScript configs; root also enables `noUncheckedIndexedAccess`, `noImplicitReturns`, and `noFallthroughCasesInSwitch`.
+- Shared frontend/backend types flow from `shared/src` to `shared/dist`, then into `api` and `web` through `@ship/shared`.
+- Examples found:
+  - Generics: `shared/src/types/api.ts` defines `ApiResponse<T = unknown>`.
+  - Discriminated unions: `DocumentType` and document property interfaces discriminate behavior by `document_type`.
+  - Utility types: `Partial<ProjectProperties>` in `shared/src/types/document.ts`, `Partial<UploadProgress>` in `web/src/services/upload.ts`, and `Record<...>` maps throughout web/API code.
+  - Type guards / predicate helpers: `isAllowedFileType()` and `isImageFile()` in `web/src/services/upload.ts`.
+- Patterns to handle carefully during implementation: broad JSONB `Record<string, unknown>` compatibility, route-local row casts, non-null assertions on auth context, and Zod schemas used as runtime validation beside TypeScript types.
+
+### Phase 2: Testing Infrastructure
+
+- Playwright structure is covered in [E2E Tests](#e2e-tests): testcontainers give each worker isolated Postgres/API/web resources.
+- Test database setup/teardown is covered in [Testing Infrastructure](#7-testing-infrastructure): E2E workers create and tear down their own containers; API Vitest requires a correct `DATABASE_URL`.
+- Full test-suite status is captured in the audit report rather than this orientation note: API passes with the right DB URL, web Vitest has deterministic failures, and the E2E suite was inventoried because full browser execution is expensive.
+
+### Phase 2: Build And Deploy
+
+- Docker build behavior is covered in [Local/Docker](#localdocker) and [Production Shape](#production-shape): build `shared`, build API/web, copy schema/migrations, run migrations, then start the compiled API.
+- Docker Compose behavior is covered in [Local/Docker](#localdocker): `docker-compose.local.yml` starts Postgres, API, and web for local development.
+- Terraform/cloud expectations are covered in [Production Shape](#production-shape): CloudFront/S3 frontend, Elastic Beanstalk API, Aurora/Postgres, SSM, security groups, WAF, and WebSocket routing.
+- CI/CD status: no checked-in GitHub Actions or GitLab CI workflow was found; deployment automation appears documented but externally triggered or manual.
+
+### Phase 3: Synthesis
+
+- The three strongest architectural decisions are listed in [Strongest Decisions](#strongest-decisions).
+- The three weakest/highest-risk points are listed in [Weakest / Highest-Risk Points](#weakest--highest-risk-points).
+- The new-engineer briefing is captured in [What I Would Tell A New Engineer First](#what-i-would-tell-a-new-engineer-first).
+- The likely 10x-user failure modes are captured in [What Breaks First At 10x Users](#what-breaks-first-at-10x-users).
