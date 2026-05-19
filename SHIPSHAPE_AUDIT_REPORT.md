@@ -4,6 +4,20 @@ Audit date: 2026-05-18
 
 Scope rule: this report is diagnosis only. No product-code fixes were made while collecting these baselines.
 
+## Measurement Summary
+
+The Week 4 audit requires each category to describe the tools, commands, and methodology used before presenting baseline numbers. Each category below includes a detailed `Methodology` section; this table is the quick map.
+
+| Category | How It Was Measured |
+|---|---|
+| Type Safety | TypeScript config review, monorepo `type-check`, and a TypeScript compiler-API scan of `web/src`, `api/src`, and `shared/src` for `any`, assertions, non-null assertions, TS directives, untyped params, and missing return types. |
+| Bundle Size | Production Vite build output, `web/dist/assets` chunk counts/sizes, gzip sizes, `vite-bundle-visualizer` raw/sourcemap data, dependency attribution, and import-path review. |
+| API Response Time | Seeded local Postgres benchmark database, authenticated local API session, `autocannon` at 10/25/50 concurrency, and a Node HTTP latency harness for exact P50/P95/P99. |
+| Database Query Efficiency | PostgreSQL statement-duration logging around marked user flows, parsed `docker logs`, representative `EXPLAIN (ANALYZE, BUFFERS)`, and index review. |
+| Test Coverage and Quality | Test script/config review, static and runtime test inventory, API and web Vitest runs, Playwright test listing, skip/focus scans, and API coverage command attempt. |
+| Runtime Error and Edge Cases | Local API/web servers against seeded data, Playwright-driven browser probes, console/page/request/server-log capture, malformed input tests, offline/reconnect checks, concurrency checks, and static error-boundary review. |
+| Accessibility Compliance | `@axe-core/playwright` scans, Lighthouse accessibility audits, keyboard smoke testing, and source/test review for ARIA, focus, and keyboard patterns. |
+
 ## 1. Type Safety
 
 ### Methodology
