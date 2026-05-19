@@ -365,6 +365,10 @@ CREATE INDEX IF NOT EXISTS idx_documents_visibility_created_by ON documents(visi
 CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at) WHERE archived_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_deleted_at ON documents(deleted_at) WHERE deleted_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(workspace_id, document_type) WHERE archived_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_active_list_order ON documents(workspace_id, document_type, parent_id, position ASC, created_at DESC) WHERE archived_at IS NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_documents_sprint_number_active ON documents(workspace_id, ((properties->>'sprint_number')::int)) WHERE document_type = 'sprint' AND archived_at IS NULL AND deleted_at IS NULL AND properties ? 'sprint_number';
+CREATE INDEX IF NOT EXISTS idx_documents_weekly_person_week_active ON documents(workspace_id, document_type, (properties->>'person_id'), ((properties->>'week_number')::int)) WHERE document_type IN ('weekly_plan', 'weekly_retro') AND archived_at IS NULL AND deleted_at IS NULL AND properties ? 'person_id' AND properties ? 'week_number';
+CREATE INDEX IF NOT EXISTS idx_documents_standup_author_parent_created ON documents(workspace_id, (properties->>'author_id'), parent_id, created_at DESC) WHERE document_type = 'standup' AND deleted_at IS NULL AND properties ? 'author_id';
 
 -- Document conversion indexes
 CREATE INDEX IF NOT EXISTS idx_documents_converted_to ON documents(converted_to_id) WHERE converted_to_id IS NOT NULL;

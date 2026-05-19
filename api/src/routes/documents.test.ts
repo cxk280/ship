@@ -94,6 +94,17 @@ describe('Documents API - PATCH with Issue Fields', () => {
   })
 
   describe('PATCH /api/documents/:id with top-level issue fields', () => {
+    it('should reject an invalid document id without hitting Postgres UUID casting', async () => {
+      const response = await request(app)
+        .patch('/api/documents/not-a-uuid')
+        .set('Cookie', sessionCookie)
+        .set('x-csrf-token', csrfToken)
+        .send({ title: 'Should not update' })
+
+      expect(response.status).toBe(400)
+      expect(response.body.error).toBe('Invalid document id')
+    })
+
     it('should accept state at top level and store in properties', async () => {
       const response = await request(app)
         .patch(`/api/documents/${testIssueId}`)

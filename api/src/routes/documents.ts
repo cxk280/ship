@@ -90,6 +90,8 @@ const updateDocumentSchema = z.object({
   plan: z.string().optional(), // Alias for hypothesis (frontend sends 'plan', stored as 'plan' in properties)
 });
 
+const uuidParamSchema = z.string().uuid();
+
 // List documents
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -597,6 +599,12 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     const id = String(req.params.id);
     const userId = String(req.userId);
     const workspaceId = String(req.workspaceId);
+
+    const parsedId = uuidParamSchema.safeParse(id);
+    if (!parsedId.success) {
+      res.status(400).json({ error: 'Invalid document id' });
+      return;
+    }
 
     const parsed = updateDocumentSchema.safeParse(req.body);
     if (!parsed.success) {

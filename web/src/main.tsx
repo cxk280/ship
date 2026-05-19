@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -16,34 +16,35 @@ import { ProjectsProvider } from '@/contexts/ProjectsContext';
 import { ArchivedPersonsProvider } from '@/contexts/ArchivedPersonsContext';
 import { CurrentDocumentProvider } from '@/contexts/CurrentDocumentContext';
 import { UploadProvider } from '@/contexts/UploadContext';
-import { LoginPage } from '@/pages/Login';
 import { AppLayout } from '@/pages/App';
-import { DocumentsPage } from '@/pages/Documents';
-import { IssuesPage } from '@/pages/Issues';
-import { ProgramsPage } from '@/pages/Programs';
-import { TeamModePage } from '@/pages/TeamMode';
-import { TeamDirectoryPage } from '@/pages/TeamDirectory';
-import { PersonEditorPage } from '@/pages/PersonEditor';
-import { FeedbackEditorPage } from '@/pages/FeedbackEditor';
-import { PublicFeedbackPage } from '@/pages/PublicFeedback';
-import { ProjectsPage } from '@/pages/Projects';
-import { DashboardPage } from '@/pages/Dashboard';
-import { MyWeekPage } from '@/pages/MyWeekPage';
-import { AdminDashboardPage } from '@/pages/AdminDashboard';
-import { AdminWorkspaceDetailPage } from '@/pages/AdminWorkspaceDetail';
-import { WorkspaceSettingsPage } from '@/pages/WorkspaceSettings';
-import { ConvertedDocumentsPage } from '@/pages/ConvertedDocuments';
-import { UnifiedDocumentPage } from '@/pages/UnifiedDocumentPage';
-import { StatusOverviewPage } from '@/pages/StatusOverviewPage';
-import { ReviewsPage } from '@/pages/ReviewsPage';
-import { OrgChartPage } from '@/pages/OrgChartPage';
 import { ReviewQueueProvider } from '@/contexts/ReviewQueueContext';
 
-import { InviteAcceptPage } from '@/pages/InviteAccept';
-import { SetupPage } from '@/pages/Setup';
 import { ToastProvider } from '@/components/ui/Toast';
 import { MutationErrorToast } from '@/components/MutationErrorToast';
 import './index.css';
+
+const LoginPage = React.lazy(() => import('@/pages/Login').then((mod) => ({ default: mod.LoginPage })));
+const DocumentsPage = React.lazy(() => import('@/pages/Documents').then((mod) => ({ default: mod.DocumentsPage })));
+const IssuesPage = React.lazy(() => import('@/pages/Issues').then((mod) => ({ default: mod.IssuesPage })));
+const ProgramsPage = React.lazy(() => import('@/pages/Programs').then((mod) => ({ default: mod.ProgramsPage })));
+const TeamModePage = React.lazy(() => import('@/pages/TeamMode').then((mod) => ({ default: mod.TeamModePage })));
+const TeamDirectoryPage = React.lazy(() => import('@/pages/TeamDirectory').then((mod) => ({ default: mod.TeamDirectoryPage })));
+const PersonEditorPage = React.lazy(() => import('@/pages/PersonEditor').then((mod) => ({ default: mod.PersonEditorPage })));
+const FeedbackEditorPage = React.lazy(() => import('@/pages/FeedbackEditor').then((mod) => ({ default: mod.FeedbackEditorPage })));
+const PublicFeedbackPage = React.lazy(() => import('@/pages/PublicFeedback').then((mod) => ({ default: mod.PublicFeedbackPage })));
+const ProjectsPage = React.lazy(() => import('@/pages/Projects').then((mod) => ({ default: mod.ProjectsPage })));
+const DashboardPage = React.lazy(() => import('@/pages/Dashboard').then((mod) => ({ default: mod.DashboardPage })));
+const MyWeekPage = React.lazy(() => import('@/pages/MyWeekPage').then((mod) => ({ default: mod.MyWeekPage })));
+const AdminDashboardPage = React.lazy(() => import('@/pages/AdminDashboard').then((mod) => ({ default: mod.AdminDashboardPage })));
+const AdminWorkspaceDetailPage = React.lazy(() => import('@/pages/AdminWorkspaceDetail').then((mod) => ({ default: mod.AdminWorkspaceDetailPage })));
+const WorkspaceSettingsPage = React.lazy(() => import('@/pages/WorkspaceSettings').then((mod) => ({ default: mod.WorkspaceSettingsPage })));
+const ConvertedDocumentsPage = React.lazy(() => import('@/pages/ConvertedDocuments').then((mod) => ({ default: mod.ConvertedDocumentsPage })));
+const UnifiedDocumentPage = React.lazy(() => import('@/pages/UnifiedDocumentPage').then((mod) => ({ default: mod.UnifiedDocumentPage })));
+const StatusOverviewPage = React.lazy(() => import('@/pages/StatusOverviewPage').then((mod) => ({ default: mod.StatusOverviewPage })));
+const ReviewsPage = React.lazy(() => import('@/pages/ReviewsPage').then((mod) => ({ default: mod.ReviewsPage })));
+const OrgChartPage = React.lazy(() => import('@/pages/OrgChartPage').then((mod) => ({ default: mod.OrgChartPage })));
+const InviteAcceptPage = React.lazy(() => import('@/pages/InviteAccept').then((mod) => ({ default: mod.InviteAcceptPage })));
+const SetupPage = React.lazy(() => import('@/pages/Setup').then((mod) => ({ default: mod.SetupPage })));
 
 /**
  * Redirect component for type-specific routes to canonical /documents/:id
@@ -85,6 +86,14 @@ function PlaceholderPage({ title, subtitle }: { title: string; subtitle: string 
     <div className="flex h-full flex-col items-center justify-center">
       <h1 className="text-xl font-medium text-foreground">{title}</h1>
       <p className="mt-1 text-sm text-muted">{subtitle}</p>
+    </div>
+  );
+}
+
+function RouteFallback() {
+  return (
+    <div className="flex h-full min-h-screen items-center justify-center bg-background text-muted">
+      Loading...
     </div>
   );
 }
@@ -144,7 +153,9 @@ function App() {
           <WorkspaceProvider>
             <AuthProvider>
               <RealtimeEventsProvider>
-                <AppRoutes />
+                <Suspense fallback={<RouteFallback />}>
+                  <AppRoutes />
+                </Suspense>
               </RealtimeEventsProvider>
             </AuthProvider>
           </WorkspaceProvider>
