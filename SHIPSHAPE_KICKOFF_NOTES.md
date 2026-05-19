@@ -4,6 +4,8 @@ Date read: May 18, 2026
 Source: `/Users/christopherking/Desktop/Gauntlet/ShipShape — Kickoff.pdf`  
 Purpose: Durable working memory for the ShipShape audit and implementation sprint. Use with `GFA Week 4 - ShipShape.pdf`.
 
+Source precedence: if `ShipShape - Kickoff.pdf` and `GFA Week 4 - ShipShape.pdf` contradict one another, follow the Kickoff PDF.
+
 ## Core Mandate
 
 ShipShape is about inheriting a production TypeScript system, understanding it deeply, measuring its health, diagnosing weaknesses, and improving it with proof.
