@@ -761,6 +761,6 @@ Current closed stretch gates:
 - Database query efficiency: the audited main-page flow now measures `25` SQL queries versus the `33` baseline and `26` stretch target.
 - Accessibility: the new stretch axe spec passes with 0 Critical/Serious violations across Login, Docs, Document Editor, Projects, Team, and My Week after fixing the Team current-week contrast failure.
 
-Remaining tracked gate:
+Current closed coverage gate:
 
-- Changed-file coverage needs a dedicated threshold gate. Focused regression tests were added for the changed document summary API path, auth middleware behavior, and document-list query path, but the repository still reports package-level coverage rather than enforcing the 80% changed-file target automatically.
+- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks changed executable lines against an 80% threshold. Current result: `226/227` changed executable unit lines covered, `99.56%` overall. Team/heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.

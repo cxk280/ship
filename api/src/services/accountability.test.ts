@@ -102,6 +102,47 @@ describe('Accountability Service', () => {
       expect(types).not.toContain('week_issues');
       expect(types).not.toContain('project_retro');
     });
+
+    it('batches standup lookups across active sprints', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2024-01-03T12:00:00Z'));
+
+      mockSetupQueries()
+        // active sprints with assigned issues
+        .mockResolvedValueOnce({
+          rows: [
+            { id: sprintId, title: 'Week 1', properties: { sprint_number: 1 }, issue_count: '2' },
+          ],
+        } as any)
+        // today standups
+        .mockResolvedValueOnce({ rows: [] } as any)
+        // last standups
+        .mockResolvedValueOnce({
+          rows: [{ parent_id: sprintId, last_standup_date: '2024-01-01' }],
+        } as any)
+        // owned sprints
+        .mockResolvedValueOnce({ rows: [] } as any)
+        // changes_requested check
+        .mockResolvedValueOnce({ rows: [] } as any);
+
+      vi.mocked(getAllocations)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const result = await checkMissingAccountability(userId, workspaceId);
+
+      const standupItem = result.find((item) => item.type === 'standup');
+      expect(standupItem).toMatchObject({
+        targetId: sprintId,
+        dueDate: '2024-01-03',
+        issueCount: 2,
+        daysSinceLastStandup: 2,
+      });
+      expect(standupItem?.message).toContain('2 days since last');
+      expect(vi.mocked(pool.query).mock.calls.some(([sql]) =>
+        String(sql).includes('parent_id = ANY($3::uuid[])')
+      )).toBe(true);
+    });
   });
 
   describe('date calculations', () => {
