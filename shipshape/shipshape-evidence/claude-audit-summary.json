@@ -1,0 +1,75 @@
+{
+  "date": "2026-05-20",
+  "audit_phase": "Claude audit of Codex audits",
+  "type_safety": {
+    "baseline_core_violations": 1281,
+    "current_core_violations": 949,
+    "reduction": 332,
+    "reduction_percent": 25.92,
+    "verification_method": "TypeScript compiler-API recount across web/src, api/src, shared/src (any + as + non-null + @ts-ignore/@ts-expect-error)",
+    "per_bucket_now": {
+      "api_prod": 373,
+      "api_test": 131,
+      "web_prod": 419,
+      "web_test": 24,
+      "shared": 2
+    },
+    "gate": "Kickoff: eliminate 25% of type-safety violations",
+    "status": "passed",
+    "caveat": "Most of the reduction comes from typing test mocks and the yjsConverter utility; in production code, web/src is roughly unchanged from baseline. Three of the top-5 audited violation-dense files were addressed; UnifiedDocumentPage.tsx (rank 4) was not."
+  },
+  "bundle_size": {
+    "audit_baseline_main_chunk_kib": 2025.10,
+    "current_main_chunk_bytes": 470976,
+    "current_main_chunk_kib": 459.94,
+    "initial_reduction_percent": 76.7,
+    "current_total_js_kib": 2219.59,
+    "audit_baseline_total_js_kib": 2197.70,
+    "remaining_async_warning_chunk": "PropertyRow-DDhvyS-a.js (816.83 KiB) — still triggers Vite's >500 KiB warning, but is async-loaded",
+    "gate": "Kickoff: 15% total OR 20% off initial via code split",
+    "status": "passed_alternative_gate"
+  },
+  "changed_line_coverage": {
+    "before_claude_fix": {
+      "overall_lines": "405/407",
+      "overall_percent": 99.51,
+      "failing_files": [
+        { "file": "api/src/utils/yjsConverter.ts", "covered": 6, "total": 8, "percent": 75.00 }
+      ],
+      "exit_code": 1,
+      "status": "failed"
+    },
+    "after_claude_fix": {
+      "overall_lines": "407/407",
+      "overall_percent": 100.00,
+      "failing_files": [],
+      "exit_code": 0,
+      "status": "passed",
+      "fix": "Added api/src/utils/__tests__/yjsConverter.test.ts (10 tests) covering the extractTextWithMarks link branch, nested marks, heading-level number conversion, jsonToYjs round-trip, and loadContentFromYjsState valid/invalid buffers."
+    }
+  },
+  "accessibility_followup": {
+    "audit_finding": "Login page lacked a <main> landmark (axe Moderate: landmark-one-main / region) — see SHIPSHAPE_AUDIT_REPORT.md:687-689.",
+    "fix": "Wrapped Login content in <main id=\"main-content\"> in both the checking-setup loading branch and the main login form branch.",
+    "status": "addressed"
+  },
+  "tests": {
+    "api_tests_passing": "28 files / 455 tests",
+    "web_tests_passing": "19 files / 157 tests"
+  },
+  "remaining_caveats_not_addressed_by_claude": [
+    "API perf benchmark relies on 10s response caches that warm before measurement — not strictly 'identical conditions' per Kickoff.",
+    "Session-validation cache (5s) extends authentication beyond revocation; no test gates this behavior.",
+    "Concurrent title-edit last-writer-wins (audit's actual data-loss candidate) was not fixed by Codex; Claude did not add a fix for it either, since changing UX here would warrant a separate, scoped change.",
+    "Accountability modal still auto-opens over core workflows; audit flagged this as High but no fix landed.",
+    "ContextTreeNav.tsx / DocumentTreeItem.tsx / ProjectContextSidebar.tsx still use role=\"tree\" — appears valid for axe but was not surveyed exhaustively."
+  ],
+  "verification_commands": [
+    "node count-violations.mjs",
+    "ls -la web/dist/assets/index-*.js",
+    "DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api test",
+    "npx pnpm@10.27.0 --filter @ship/web test",
+    "DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_dev npx pnpm@10.27.0 test:coverage:changed",
+    "DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/utils/__tests__/yjsConverter.test.ts"
+  ]
+}
