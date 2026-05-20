@@ -10,19 +10,19 @@ Stretch goals are pass criteria for the implementation phase.
 
 | Stretch goal | Status | Evidence / next gate |
 | --- | --- | --- |
-| Main initial bundle at least 20% smaller and below the Vite warning threshold | Achieved | Main app chunk is now `470.85 kB / 140.59 kB gzip`, down from `2,025.10 KiB / 572.07 KiB gzip`. |
+| Main initial bundle at least 20% smaller and below the Vite warning threshold | Achieved | Main app chunk is now `470.98 kB / 140.68 kB gzip`, down from `2,025.10 KiB / 572.07 KiB gzip`. |
 | 100% green API and web unit tests | Achieved for current local suites | API: 28 files / 451 tests passed against local Ship Postgres. Web: 16 files / 151 tests passed. |
 | Working API and web coverage reports | Achieved | Added `@vitest/coverage-v8`; API and web coverage commands now generate reports. Added root `test:coverage` and web `test:coverage` scripts. |
-| 80% coverage on changed files | Achieved | Added `test:coverage:changed`, JSON coverage reporters, and a changed-line coverage gate. Current result: `226/227` changed executable unit lines covered, `99.56%` overall. |
-| 20% P95 reduction on `GET /api/team/accountability-grid-v3` and `GET /api/documents?type=wiki` | Achieved | Seeded 550 wiki / 104 issue / 35 sprint / 11 person benchmark, 50 concurrency, 5s: documents summary P95 `735ms` vs `1,210ms` baseline; team grid P95 `284ms` vs `1,818ms` baseline. |
+| 80% coverage on changed files | Achieved | Added `test:coverage:changed`, JSON coverage reporters, a changed-line coverage gate, and a package-level coverage ratchet. Current post-commit changed-line result: `344/384` changed executable unit lines covered, `89.58%` overall. |
+| 20% P95 reduction on `GET /api/team/accountability-grid-v3` and `GET /api/documents?type=wiki` | Achieved | Seeded 550 wiki / 104 issue / 35 sprint / 11 person benchmark, 50 concurrency, 5s: documents summary P95 `198ms` vs `1,210ms` baseline; team grid P95 `119ms` vs `1,818ms` baseline. |
 | 20% main-page query-count reduction or 50% slowest-query improvement | Achieved | New query-count harness measured the audited main-page flow at `25` SQL queries versus the `33` baseline and `26` target. |
-| 0 Critical/Serious axe violations on target pages | Achieved | Added a stretch accessibility Playwright/axe spec covering Login, Docs, Document Editor, Projects, Team, and My Week. Fixed Team current-week contrast. Spec passed: 1 test, 6 page scans. |
+| 0 Critical/Serious axe violations on target pages | Achieved | Added a stretch accessibility Playwright/axe spec covering Login, Docs, Document Editor, Projects, Team, and My Week. Fixed Team and My Week current-week contrast. Spec passed: 1 test, 6 page scans. |
 
 ### Bundle Size
 
 - Converted most route pages in `web/src/main.tsx` from static imports to `React.lazy` route chunks.
 - Added a Suspense fallback around the route tree while keeping the protected app shell static.
-- Result: the main app chunk dropped from the audit baseline of `2,025.10 KiB min / 572.07 KiB gzip` to `470.85 kB / 140.59 kB gzip`, below Vite's `500 KiB` warning threshold.
+- Result: the main app chunk dropped from the audit baseline of `2,025.10 KiB min / 572.07 KiB gzip` to `470.98 kB / 140.68 kB gzip`, below Vite's `500 KiB` warning threshold.
 - Remaining work: `PropertyRow` is still a large async chunk (`836.44 kB / 261.85 kB gzip`) and should be tackled in a later bundle pass.
 
 Verification:
@@ -78,7 +78,6 @@ Verification:
 - `npx pnpm@10.27.0 --filter @ship/web type-check` passed.
 - `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/services/accountability.test.ts src/routes/documents.test.ts` passed: 2 files, 33 tests.
 - `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api db:migrate` passed against local Ship Postgres.
-- Benchmark proof is still pending for the API/DB stretch-goal deltas.
 
 ## Implementation Slice 2
 
@@ -100,9 +99,9 @@ Benchmark setup:
 Latency verification:
 
 - `SHIPSHAPE_BASE_URL=http://localhost:3002 SHIPSHAPE_CONCURRENCY=50 SHIPSHAPE_DURATION_MS=5000 node scripts/shipshape-latency-benchmark.mjs`
-- Result: `/api/documents?type=wiki&summary=true` P50 `208ms`, P95 `735ms`, P99 `1473ms`, 908 requests, 0 errors, 0 non-2xx.
-- Result: `/api/team/accountability-grid-v3` P50 `155ms`, P95 `284ms`, P99 `606ms`, 1,396 requests, 0 errors, 0 non-2xx.
-- Against the audit baseline, documents improved from `1,210ms` P95 to `735ms` P95; team grid improved from `1,818ms` P95 to `284ms` P95.
+- Result: `/api/documents?type=wiki&summary=true` P50 `84ms`, P95 `198ms`, P99 `1051ms`, 1,838 requests, 0 errors, 0 non-2xx.
+- Result: `/api/team/accountability-grid-v3` P50 `66ms`, P95 `119ms`, P99 `144ms`, 3,211 requests, 0 errors, 0 non-2xx.
+- Against the audit baseline, documents improved from `1,210ms` P95 to `198ms` P95; team grid improved from `1,818ms` P95 to `119ms` P95.
 
 Query-count verification:
 
@@ -113,7 +112,7 @@ Query-count verification:
 ### Accessibility
 
 - Added `e2e/accessibility-stretch.spec.ts` to scan the stretch target pages with axe: Login, Docs, Document Editor, Projects, Team, and My Week.
-- Fixed a serious color-contrast violation on the Team allocation/current-week header by using foreground text on the dark background instead of the lower-contrast accent blue.
+- Fixed serious color-contrast violations on Team allocation/current-week text and the My Week current badge by using AA-safe foreground colors instead of lower-contrast accent-blue text.
 
 Verification:
 
@@ -126,14 +125,58 @@ Verification:
 - Added an accountability service regression for the batched standup lookup path.
 - Stabilized `api/src/__tests__/auth.test.ts` mock setup by resetting the mocked `pool.query` implementation between tests.
 - Added `scripts/check-changed-coverage.mjs` and `test:coverage:changed` to enforce the 80% changed-file coverage stretch target against changed executable lines.
-- The changed-line gate excludes app bootstrap/shell lines from unit coverage and records that the Team/heatmap visual contrast changes are covered by the Playwright axe stretch spec instead.
+- The changed-line gate excludes app bootstrap/shell lines from unit coverage and records that the Team, My Week, and heatmap visual contrast changes are covered by the Playwright axe stretch spec instead.
 
 Verification:
 
-- `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 test:coverage:changed` passed: API 28 files / 454 tests, web 17 files / 153 tests, changed-line coverage `226/227` (`99.56%`).
+- `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 test:coverage:changed` passed before final commit with changed-line coverage `226/226` (`100.00%`), plus package coverage ratchet.
 - `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/__tests__/auth.test.ts` passed: 15 tests.
 - `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/routes/documents.test.ts` passed: 21 tests.
 - `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/services/accountability.test.ts --coverage` passed: 14 tests.
 - `npx pnpm@10.27.0 --filter @ship/web exec vitest run src/hooks/useDocumentsQuery.test.ts` passed: 2 tests.
 - `npx pnpm@10.27.0 --filter @ship/api type-check` passed.
 - `npx pnpm@10.27.0 --filter @ship/web type-check` passed.
+
+## Implementation Slice 3
+
+### Type Safety
+
+- Added `api/src/utils/authenticated-request.ts` with an assertion helper that narrows authenticated Express requests to required `userId` and `workspaceId` fields.
+- Updated the three highest-risk audited route files, `api/src/routes/weeks.ts`, `api/src/routes/projects.ts`, and `api/src/routes/issues.ts`, to use the helper instead of repeated authenticated-context non-null assertions.
+- Result: audited top-three API route core violations dropped from `185` to `77` (`58.4%` reduction), exceeding the audit target of a 40% reduction in those hotspots.
+
+Verification:
+
+- `npx pnpm@10.27.0 --filter @ship/api type-check` passed.
+- TypeScript compiler-API recount after the change:
+  - `api/src/routes/weeks.ts`: core total `37` vs baseline `85`.
+  - `api/src/routes/projects.ts`: core total `25` vs baseline `51`.
+  - `api/src/routes/issues.ts`: core total `15` vs baseline `49`.
+
+### Runtime Error Handling
+
+- Kept the invalid UUID guard for `PATCH /api/documents/:id` from Slice 1.
+- Added process-level logging for unhandled promise rejections and uncaught exceptions in `api/src/index.ts`, so unexpected runtime failures are visible in server logs instead of silently disappearing.
+- Added an explicit Documents-page error state with a retry action in `web/src/pages/Documents.tsx`, backed by `useDocuments` error propagation. This closes the audited blank-page risk for delayed or failed document-list loads.
+
+Verification:
+
+- `npx pnpm@10.27.0 --filter @ship/api type-check` passed.
+- `npx pnpm@10.27.0 --filter @ship/web type-check` passed.
+
+### Residual Coverage Risk
+
+- Added `scripts/check-coverage-ratchet.mjs` and wired it into `test:coverage:changed`.
+- The changed-file gate still enforces the mandatory 80% changed-line target, while the ratchet prevents overall API/web package coverage from silently dropping below the current baseline.
+- Ratchet minimums are intentionally set at the current package floor: API `40/40/33/40` and web `28/27/19/24` for lines/statements/branches/functions.
+
+## Final Verification Pass
+
+- `npx pnpm@10.27.0 build` passed; main app chunk `470.98 kB / 140.68 kB gzip`.
+- `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api test` passed: 28 files / 454 tests.
+- `npx pnpm@10.27.0 --filter @ship/web test` passed: 17 files / 153 tests.
+- `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 test:coverage:changed` passed after final commit with changed-line coverage `344/384` (`89.58%`) and package ratchet floors cleared.
+- `COREPACK_INTEGRITY_KEYS=0 PLAYWRIGHT_WORKERS=1 ./node_modules/.bin/playwright test e2e/accessibility-stretch.spec.ts --project=chromium --reporter=line` passed: 1 test, 6 page scans.
+- `SHIPSHAPE_BASE_URL=http://localhost:3002 SHIPSHAPE_CONCURRENCY=50 SHIPSHAPE_DURATION_MS=5000 node scripts/shipshape-latency-benchmark.mjs` passed with documents P95 `198ms` and team grid P95 `119ms`.
+- `DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev SESSION_SECRET=local-dev-session-secret-not-for-production E2E_TEST=1 npx pnpm@10.27.0 --filter @ship/api exec tsx ../scripts/shipshape-query-count.ts` passed with `25` SQL queries against a target of `26`.
+- `git diff --check` passed.

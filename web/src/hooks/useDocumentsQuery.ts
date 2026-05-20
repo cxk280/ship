@@ -14,6 +14,8 @@ export interface WikiDocument {
   visibility: 'private' | 'workspace';
 }
 
+export type DocumentsError = Error & { status?: number };
+
 // Query keys
 export const documentKeys = {
   all: ['documents'] as const,
@@ -204,7 +206,7 @@ export function useDeleteDocument() {
 
 // Compatibility hook that matches the old useDocuments interface
 export function useDocuments() {
-  const { data: documents = [], isLoading: loading, refetch } = useDocumentsQuery('wiki');
+  const { data: documents = [], isLoading: loading, error, refetch } = useDocumentsQuery('wiki');
   const createMutation = useCreateDocument();
   const updateMutation = useUpdateDocument();
   const deleteMutation = useDeleteDocument();
@@ -241,6 +243,7 @@ export function useDocuments() {
   return {
     documents,
     loading,
+    error: error as DocumentsError | null,
     createDocument,
     updateDocument,
     deleteDocument,

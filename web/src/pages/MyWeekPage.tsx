@@ -119,7 +119,7 @@ export function MyWeekPage() {
         <div className="flex items-center gap-2.5">
           <h1 className="text-xl font-semibold text-foreground">Week {week.week_number}</h1>
           {week.is_current && (
-            <span className="text-xs bg-accent/20 text-accent px-1.5 py-0.5 rounded">Current</span>
+            <span className="rounded bg-accent px-1.5 py-0.5 text-xs font-medium text-white">Current</span>
           )}
         </div>
         <div className="flex items-center gap-1">

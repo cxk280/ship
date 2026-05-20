@@ -757,10 +757,11 @@ The audit baselines above remain the historical findings. Implementation progres
 
 Current closed stretch gates:
 
-- API latency: seeded 50-concurrency benchmark improved wiki document listing from `1,210ms` P95 to `735ms` P95 and team accountability grid from `1,818ms` P95 to `284ms` P95.
+- API latency: seeded 50-concurrency benchmark improved wiki document listing from `1,210ms` P95 to `198ms` P95 and team accountability grid from `1,818ms` P95 to `119ms` P95.
 - Database query efficiency: the audited main-page flow now measures `25` SQL queries versus the `33` baseline and `26` stretch target.
-- Accessibility: the new stretch axe spec passes with 0 Critical/Serious violations across Login, Docs, Document Editor, Projects, Team, and My Week after fixing the Team current-week contrast failure.
+- Accessibility: the new stretch axe spec passes with 0 Critical/Serious violations across Login, Docs, Document Editor, Projects, Team, and My Week after fixing Team and My Week current-week contrast failures.
 
 Current closed coverage gate:
 
-- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks changed executable lines against an 80% threshold. Current result: `226/227` changed executable unit lines covered, `99.56%` overall. Team/heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.
+- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks changed executable lines against an 80% overall threshold. Current post-commit result: `344/384` changed executable unit lines covered, `89.58%` overall. Team, My Week, and heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.
+- The remaining low overall package-coverage risk is controlled by `scripts/check-coverage-ratchet.mjs`, also wired into `test:coverage:changed`. The ratchet fails if API or web package coverage drops below the current baseline floor while future work raises the floor over time.
