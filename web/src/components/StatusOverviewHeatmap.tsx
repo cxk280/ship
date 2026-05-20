@@ -400,7 +400,7 @@ export function StatusOverviewHeatmap({ showArchived = false }: StatusOverviewHe
                     week.isCurrent && 'ring-1 ring-inset ring-accent/30'
                   )}
                 >
-                  <span className={cn('text-xs font-medium', week.isCurrent ? 'text-accent' : 'text-foreground')}>
+                  <span className="text-xs font-medium text-foreground">
                     {week.name}
                   </span>
                   <span className="text-[10px] text-muted">

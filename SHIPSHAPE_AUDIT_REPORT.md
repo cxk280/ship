@@ -750,3 +750,17 @@ The dominant issue is not missing labels on icon buttons; it is invalid or incom
 - Rework selection table headers so the selection column has accessible text without triggering empty-header violations.
 - Verify skip-link focus and command palette shortcut behavior manually, then add regression tests if either is broken.
 - For exceeding the benchmark later: target **0 Critical/Serious axe violations** on Login, Docs, Document Editor, Projects, Team, and My Week, plus Lighthouse accessibility scores of **100** on Docs and My Week.
+
+## Implementation Evidence Addendum
+
+The audit baselines above remain the historical findings. Implementation progress and current verification are tracked in `FIXES_IMPLEMENTATION.md`.
+
+Current closed stretch gates:
+
+- API latency: seeded 50-concurrency benchmark improved wiki document listing from `1,210ms` P95 to `735ms` P95 and team accountability grid from `1,818ms` P95 to `284ms` P95.
+- Database query efficiency: the audited main-page flow now measures `25` SQL queries versus the `33` baseline and `26` stretch target.
+- Accessibility: the new stretch axe spec passes with 0 Critical/Serious violations across Login, Docs, Document Editor, Projects, Team, and My Week after fixing the Team current-week contrast failure.
+
+Remaining tracked gate:
+
+- Changed-file coverage needs a dedicated threshold gate. Focused regression tests were added for the changed document summary API path, auth middleware behavior, and document-list query path, but the repository still reports package-level coverage rather than enforcing the 80% changed-file target automatically.

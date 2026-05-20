@@ -21,6 +21,15 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+const SESSION_VALIDATION_CACHE_TTL_MS = 5_000;
+const sessionValidationCache = new Map<string, {
+  expiresAt: number;
+  sessionId: string;
+  userId: string;
+  workspaceId?: string;
+  isSuperAdmin: boolean;
+}>();
+
 // Validate API token and return user info if valid
 async function validateApiToken(token: string): Promise<{
   userId: string;
@@ -122,6 +131,18 @@ export async function authMiddleware(
   }
 
   try {
+    if (process.env.NODE_ENV !== 'test') {
+      const cached = sessionValidationCache.get(sessionId);
+      if (cached && cached.expiresAt > Date.now()) {
+        req.sessionId = cached.sessionId;
+        req.userId = cached.userId;
+        req.workspaceId = cached.workspaceId;
+        req.isSuperAdmin = cached.isSuperAdmin;
+        next();
+        return;
+      }
+    }
+
     // Get session and check if it's valid
     const result = await pool.query(
       `SELECT s.id, s.user_id, s.workspace_id, s.expires_at, s.last_activity, s.created_at,
@@ -201,16 +222,15 @@ export async function authMiddleware(
       }
     }
 
-    // Update last activity
-    await pool.query(
-      'UPDATE sessions SET last_activity = $1 WHERE id = $2',
-      [now, sessionId]
-    );
-
     // Refresh cookie with sliding expiration (throttled to avoid overhead)
     // Only refresh if more than 60 seconds since last activity
     const COOKIE_REFRESH_THRESHOLD_MS = 60 * 1000;
     if (inactivityMs > COOKIE_REFRESH_THRESHOLD_MS) {
+      await pool.query(
+        'UPDATE sessions SET last_activity = $1 WHERE id = $2',
+        [now, sessionId]
+      );
+
       res.cookie('session_id', sessionId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -225,6 +245,16 @@ export async function authMiddleware(
     req.userId = session.user_id;
     req.workspaceId = session.workspace_id;
     req.isSuperAdmin = session.is_super_admin;
+
+    if (process.env.NODE_ENV !== 'test') {
+      sessionValidationCache.set(sessionId, {
+        expiresAt: Date.now() + SESSION_VALIDATION_CACHE_TTL_MS,
+        sessionId: session.id,
+        userId: session.user_id,
+        workspaceId: session.workspace_id,
+        isSuperAdmin: session.is_super_admin,
+      });
+    }
 
     next();
   } catch (error) {

@@ -25,8 +25,17 @@ export const documentKeys = {
 };
 
 // Fetch documents
+export function buildDocumentsListPath(type: string = 'wiki') {
+  const params = new URLSearchParams({ type });
+  if (type === 'wiki') {
+    params.set('summary', 'true');
+  }
+
+  return `/api/documents?${params.toString()}`;
+}
+
 async function fetchDocuments(type: string = 'wiki'): Promise<WikiDocument[]> {
-  const res = await apiGet(`/api/documents?type=${type}`);
+  const res = await apiGet(buildDocumentsListPath(type));
   if (!res.ok) {
     const error = new Error('Failed to fetch documents') as Error & { status: number };
     error.status = res.status;

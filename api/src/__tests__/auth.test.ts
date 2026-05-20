@@ -26,7 +26,7 @@ function createMockReqRes(cookies: Record<string, string> = {}) {
 
 describe('authMiddleware', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.mocked(pool.query).mockReset();
   });
 
   describe('session validation', () => {

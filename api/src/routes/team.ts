@@ -7,6 +7,9 @@ import { TEMPLATE_HEADINGS, extractText, hasContent } from '../utils/document-co
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
 
+const ACCOUNTABILITY_GRID_CACHE_TTL_MS = 10_000;
+const accountabilityGridCache = new Map<string, { expiresAt: number; body: string }>();
+
 // GET /api/team/grid - Get team grid data
 // Query params:
 //   fromSprint: number - start of range (default: current - 7)
@@ -1618,6 +1621,13 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
       return;
     }
 
+    const cacheKey = `${workspaceId}:${showArchived}`;
+    const cached = accountabilityGridCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      res.type('application/json').send(cached.body);
+      return;
+    }
+
     // Get workspace sprint config
     const workspaceResult = await pool.query(
       `SELECT sprint_start_date FROM workspaces WHERE id = $1`,
@@ -1998,11 +2008,16 @@ router.get('/accountability-grid-v3', authMiddleware, async (req: Request, res: 
     // Filter out empty programs and convert to array
     const programs = Array.from(programGroups.values()).filter(p => p.people.length > 0);
 
-    res.json({
+    const body = JSON.stringify({
       programs,
       weeks,
       currentSprintNumber,
     });
+    accountabilityGridCache.set(cacheKey, {
+      expiresAt: Date.now() + ACCOUNTABILITY_GRID_CACHE_TTL_MS,
+      body,
+    });
+    res.type('application/json').send(body);
   } catch (err) {
     console.error('Get accountability grid v3 error:', err);
     res.status(500).json({ error: 'Internal server error' });
