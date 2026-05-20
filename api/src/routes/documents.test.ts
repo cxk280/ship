@@ -215,6 +215,7 @@ describe('Documents API - List Summary Mode', () => {
   const testWorkspaceName = `Docs Summary Test ${testRunId}`
 
   let sessionCookie: string
+  let csrfToken: string
   let testWorkspaceId: string
   let testUserId: string
 
@@ -250,6 +251,7 @@ describe('Documents API - List Summary Mode', () => {
     const csrfRes = await request(app)
       .get('/api/csrf-token')
       .set('Cookie', sessionCookie)
+    csrfToken = csrfRes.body.token
     const connectSidCookie = csrfRes.headers['set-cookie']?.[0]?.split(';')[0] || ''
     if (connectSidCookie) {
       sessionCookie = `${sessionCookie}; ${connectSidCookie}`
@@ -280,6 +282,33 @@ describe('Documents API - List Summary Mode', () => {
     expect(response.body[0].title).toBe('Summary Wiki')
     expect(response.body[0].properties).toEqual({})
     expect(response.body[0].color).toBeUndefined()
+  })
+
+  it('invalidates cached summary lists after creating a document', async () => {
+    const firstResponse = await request(app)
+      .get('/api/documents?type=wiki&summary=true')
+      .set('Cookie', sessionCookie)
+
+    expect(firstResponse.status).toBe(200)
+    expect(firstResponse.body.map((doc: { title: string }) => doc.title)).toEqual(['Summary Wiki'])
+
+    const createResponse = await request(app)
+      .post('/api/documents')
+      .set('Cookie', sessionCookie)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        title: 'Fresh Summary Wiki',
+        document_type: 'wiki',
+      })
+
+    expect(createResponse.status).toBe(201)
+
+    const secondResponse = await request(app)
+      .get('/api/documents?type=wiki&summary=true')
+      .set('Cookie', sessionCookie)
+
+    expect(secondResponse.status).toBe(200)
+    expect(secondResponse.body.map((doc: { title: string }) => doc.title)).toContain('Fresh Summary Wiki')
   })
 })
 

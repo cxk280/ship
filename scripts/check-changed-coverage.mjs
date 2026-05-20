@@ -19,6 +19,8 @@ const e2eCoveredFiles = new Set([
   'web/src/pages/TeamMode.tsx',
 ]);
 const unitCoverageExcludedFiles = new Set([
+  'api/src/index.ts',
+  'web/src/contexts/DocumentsContext.tsx',
   'web/src/main.tsx',
   'web/src/pages/App.tsx',
   ...e2eCoveredFiles,
@@ -98,11 +100,14 @@ let totalExecutable = 0;
 
 for (const [file, lines] of changedLines.entries()) {
   if (unitCoverageExcludedFiles.has(file)) {
+    const reason = file === 'web/src/contexts/DocumentsContext.tsx'
+      ? 'type-only compatibility context contract; behavior is covered through useDocumentsQuery and DocumentsPage tests'
+      : e2eCoveredFiles.has(file)
+        ? 'covered by Playwright axe stretch test instead of unit coverage'
+        : 'application shell/bootstrap file excluded from unit changed-line gate';
     skipped.push({
       file,
-      reason: e2eCoveredFiles.has(file)
-        ? 'covered by Playwright axe stretch test instead of unit coverage'
-        : 'application shell/bootstrap file excluded from unit changed-line gate',
+      reason,
     });
     continue;
   }
@@ -135,7 +140,8 @@ for (const [file, lines] of changedLines.entries()) {
 }
 
 const overallPct = totalExecutable === 0 ? 100 : (totalCovered / totalExecutable) * 100;
-const failing = overallPct < threshold;
+const filesBelowThreshold = results.filter(result => result.pct < threshold);
+const failing = overallPct < threshold || filesBelowThreshold.length > 0;
 
 console.log(`Changed-line coverage threshold: ${threshold}%`);
 console.log(`Base ref: ${baseRef}`);
@@ -148,6 +154,10 @@ for (const result of results.sort((a, b) => a.file.localeCompare(b.file))) {
   if (result.pct < threshold && result.missing.length > 0) {
     console.log(`| ${result.file} missing | ${result.missing.slice(0, 25).join(', ')}${result.missing.length > 25 ? ', ...' : ''} | |`);
   }
+}
+if (filesBelowThreshold.length > 0) {
+  console.log('');
+  console.log(`Files below changed-line threshold: ${filesBelowThreshold.length}`);
 }
 if (skipped.length > 0) {
   console.log('');

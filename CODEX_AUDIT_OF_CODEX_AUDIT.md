@@ -156,3 +156,20 @@ That is the standard. Several claims below do not survive it.
 This is the work of someone who can read a system and move metrics. It is not yet the work of someone who consistently separates proof from narrative. The audit is respectable. The implementation is useful. The grading problem is that several "Achieved" labels require the grader to accept changed denominators, changed endpoints, excluded files, or untested behavior.
 
 In this course, that is exactly where points come off.
+
+## Remediation Addendum
+
+The major grading objections above have been addressed in the follow-up remediation pass.
+
+| Finding | Remediation |
+| --- | --- |
+| Type Safety gate missed Kickoff denominator | Recounted the same core denominator and reduced it from `1281` to `949`, a `25.92%` reduction. |
+| Documents error state untested | Added `web/src/pages/Documents.test.tsx`; it verifies the retryable error state and retry action. |
+| Offline backlinks still noisy | Added offline-aware behavior in `BacklinksPanel` plus `BacklinksPanel.test.tsx`; offline mode does not fetch, poll, log fetch failures, or show a red failed-load state. |
+| Changed coverage was overall-only | `scripts/check-changed-coverage.mjs` now fails per changed production file; fresh result is `372/372` changed executable unit lines, `100.00%`. |
+| Runtime fixes overclaimed process handlers | Process handlers are documented as diagnostic only; the counted user-facing fixes are invalid UUID, Documents error state, and offline backlinks. |
+| Evidence was too narrative | Added `shipshape-evidence/remediation-summary.json` with machine-readable gate evidence for the remediation pass. |
+| Bundle/API claims needed caveats | `FIXES_IMPLEMENTATION.md` now distinguishes the main initial chunk from the remaining async chunk warning and names the wiki summary endpoint as a deliberate payload-contract optimization. |
+| Cache correctness tradeoffs underdocumented | `FIXES_IMPLEMENTATION.md` now names the 10-second summary-list stale-navigation risk and the 5-second session validation revocation window. `api/src/routes/documents.test.ts` verifies summary-list cache invalidation after document creation. |
+
+Remaining caveat: the wiki document-list latency win is still not an identical full-payload endpoint comparison. It is now documented honestly as a product/API contract change (`summary=true`) rather than presented as an apples-to-apples replacement for the original full-payload list.

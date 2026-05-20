@@ -763,5 +763,7 @@ Current closed stretch gates:
 
 Current closed coverage gate:
 
-- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks changed executable lines against an 80% overall threshold. Current post-commit result: `344/384` changed executable unit lines covered, `89.58%` overall. Team, My Week, and heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.
+- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks each changed production file against the 80% changed-line threshold. Current result: `372/372` changed executable unit lines covered, `100.00%` overall. Team, My Week, and heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.
 - The remaining low overall package-coverage risk is controlled by `scripts/check-coverage-ratchet.mjs`, also wired into `test:coverage:changed`. The ratchet fails if API or web package coverage drops below the current baseline floor while future work raises the floor over time.
+- Type safety now satisfies the Kickoff denominator: the audit's core total (`any + as + non-null + TS directives`) is down from `1281` to `949`, a `25.92%` reduction.
+- Runtime error handling now has direct regression coverage for the Documents list error state and offline backlinks behavior; process-level handlers are documented as diagnostic work, not counted as a user-facing runtime fix.

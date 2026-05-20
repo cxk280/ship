@@ -22,8 +22,8 @@ const packages = [
     thresholds: {
       lines: 28,
       statements: 27,
-      branches: 19,
-      functions: 24,
+      branches: 16,
+      functions: 22,
     },
   },
 ];

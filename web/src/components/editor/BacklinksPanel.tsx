@@ -21,9 +21,23 @@ export function BacklinksPanel({ documentId }: BacklinksPanelProps) {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; backlink: Backlink } | null>(null);
   const navigate = useNavigate();
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     if (!documentId) return;
@@ -31,6 +45,14 @@ export function BacklinksPanel({ documentId }: BacklinksPanelProps) {
     let cancelled = false;
 
     async function fetchBacklinks() {
+      if (!isOnline) {
+        if (!cancelled) {
+          setError(null);
+          setLoading(false);
+        }
+        return;
+      }
+
       try {
         // Only show loading on initial fetch, not on polls
         if (backlinks.length === 0) {
@@ -66,13 +88,15 @@ export function BacklinksPanel({ documentId }: BacklinksPanelProps) {
     fetchBacklinks();
 
     // Poll for updates every 5 seconds (for real-time backlink updates)
-    const intervalId = setInterval(fetchBacklinks, 5000);
+    const intervalId = isOnline ? setInterval(fetchBacklinks, 5000) : undefined;
 
     return () => {
       cancelled = true;
-      clearInterval(intervalId);
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
     };
-  }, [documentId]);
+  }, [documentId, isOnline]);
 
   const getDocumentUrl = (backlink: Backlink): string => {
     // Get the path based on document type
@@ -177,7 +201,7 @@ export function BacklinksPanel({ documentId }: BacklinksPanelProps) {
       <h3 className="text-xs font-medium text-muted">Backlinks</h3>
 
       {backlinks.length === 0 ? (
-        <div className="text-xs text-muted">No backlinks</div>
+        <div className="text-xs text-muted">{isOnline ? 'No backlinks' : 'Backlinks unavailable offline'}</div>
       ) : (
         <div className="space-y-1">
           {backlinks.map((backlink) => (

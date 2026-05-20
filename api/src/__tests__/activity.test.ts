@@ -11,7 +11,7 @@ vi.mock('../db/client.js', () => ({
 
 // Mock auth middleware to inject test session data
 vi.mock('../middleware/auth.js', () => ({
-  authMiddleware: (req: any, res: any, next: any) => {
+  authMiddleware: (req: express.Request, res: express.Response, next: express.NextFunction) => {
     req.workspaceId = 'test-workspace-id';
     req.userId = 'test-user-id';
     next();
@@ -20,6 +20,14 @@ vi.mock('../middleware/auth.js', () => ({
 
 import activityRouter from '../routes/activity.js';
 import { pool } from '../db/client.js';
+
+type QueryMock = {
+  mock: { calls: unknown[][] };
+  mockResolvedValueOnce: (value: unknown) => QueryMock;
+  mockRejectedValueOnce: (value: unknown) => QueryMock;
+};
+
+const queryMock = (): QueryMock => vi.mocked(pool.query) as unknown as QueryMock;
 
 // Create test Express app
 function createTestApp() {
@@ -44,11 +52,11 @@ describe('Activity API', () => {
         const workspaceId = 'test-workspace-id';
 
         // Mock entity exists check
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: programId }],
             rowCount: 1,
-          } as any)
+          })
           // Mock activity query
           .mockResolvedValueOnce({
             rows: [
@@ -56,7 +64,7 @@ describe('Activity API', () => {
               { date: '2024-01-02', count: 3 },
               { date: '2024-01-03', count: 0 },
             ],
-          } as any);
+          });
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -81,17 +89,17 @@ describe('Activity API', () => {
         const projectId = 'project-456';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: projectId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [
               { date: '2024-01-10', count: 12 },
               { date: '2024-01-11', count: 8 },
             ],
-          } as any);
+          });
 
         const response = await request(app)
           .get(`/activity/project/${projectId}`)
@@ -114,16 +122,16 @@ describe('Activity API', () => {
         const sprintId = 'sprint-789';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: sprintId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [
               { date: '2024-01-20', count: 15 },
             ],
-          } as any);
+          });
 
         const response = await request(app)
           .get(`/activity/sprint/${sprintId}`)
@@ -144,14 +152,14 @@ describe('Activity API', () => {
       it('returns empty array for entity with no activity', async () => {
         const programId = 'empty-program';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: programId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [],
-          } as any);
+          });
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -180,10 +188,10 @@ describe('Activity API', () => {
       it('returns 404 when entity does not exist', async () => {
         const nonExistentId = 'non-existent-id';
 
-        vi.mocked(pool.query).mockResolvedValueOnce({
+        queryMock().mockResolvedValueOnce({
           rows: [],
           rowCount: 0,
-        } as any);
+        });
 
         const response = await request(app)
           .get(`/activity/program/${nonExistentId}`)
@@ -198,10 +206,10 @@ describe('Activity API', () => {
         const programId = 'other-workspace-program';
 
         // Entity exists but not in user's workspace
-        vi.mocked(pool.query).mockResolvedValueOnce({
+        queryMock().mockResolvedValueOnce({
           rows: [],
           rowCount: 0,
-        } as any);
+        });
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -215,7 +223,7 @@ describe('Activity API', () => {
       it('returns 500 on database error', async () => {
         const programId = 'program-error';
 
-        vi.mocked(pool.query).mockRejectedValueOnce(
+        queryMock().mockRejectedValueOnce(
           new Error('Database connection failed')
         );
 
@@ -234,14 +242,14 @@ describe('Activity API', () => {
         const programId = 'program-123';
         const workspaceId = 'test-workspace-id';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: programId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [],
-          } as any);
+          });
 
         await request(app)
           .get(`/activity/program/${programId}`)
@@ -265,17 +273,17 @@ describe('Activity API', () => {
       it('queries exactly 30 days of activity', async () => {
         const programId = 'program-123';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: programId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: Array.from({ length: 30 }, (_, i) => ({
               date: `2024-01-${String(i + 1).padStart(2, '0')}`,
               count: i % 3,
             })),
-          } as any);
+          });
 
         const response = await request(app)
           .get(`/activity/program/${programId}`)
@@ -296,20 +304,20 @@ describe('Activity API', () => {
       it('program query includes direct documents, projects, and sprints', async () => {
         const programId = 'program-123';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: programId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [],
-          } as any);
+          });
 
         await request(app)
           .get(`/activity/program/${programId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = String(queryMock().mock.calls[1]?.[0]);
 
         // Verify query structure includes all relevant associations via document_associations
         expect(activityQuery).toContain('program_projects');
@@ -323,20 +331,20 @@ describe('Activity API', () => {
       it('project query includes direct documents and sprints', async () => {
         const projectId = 'project-456';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: projectId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [],
-          } as any);
+          });
 
         await request(app)
           .get(`/activity/project/${projectId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = String(queryMock().mock.calls[1]?.[0]);
 
         expect(activityQuery).toContain('project_sprints');
         // Project and sprint associations use document_associations junction table
@@ -348,20 +356,20 @@ describe('Activity API', () => {
       it('sprint query includes direct documents only', async () => {
         const sprintId = 'sprint-789';
 
-        vi.mocked(pool.query)
+        queryMock()
           .mockResolvedValueOnce({
             rows: [{ id: sprintId }],
             rowCount: 1,
-          } as any)
+          })
           .mockResolvedValueOnce({
             rows: [],
-          } as any);
+          });
 
         await request(app)
           .get(`/activity/sprint/${sprintId}`)
           .expect(200);
 
-        const activityQuery = vi.mocked(pool.query).mock.calls[1]![0] as string;
+        const activityQuery = String(queryMock().mock.calls[1]?.[0]);
 
         // Issues linked via junction table
         expect(activityQuery).toContain('document_associations');
