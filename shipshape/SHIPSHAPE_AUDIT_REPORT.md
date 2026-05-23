@@ -829,7 +829,9 @@ Operational details for the probe are documented in `shipshape/SECURITY_PROBE.md
 | Run | Checks Passed | Checks Failed | Checks Skipped | Findings | Severity Breakdown |
 |---|---:|---:|---:|---:|---|
 | Before fixes | 9/14 | 4 | 1 | 14 | 2 Critical, 11 High, 1 Medium |
-| After fixes | 13/14 | 1 | 0 | 11 | 1 Critical, 9 High, 1 Medium |
+| After fixes | 14/16 | 2 | 0 | 12 | 1 Critical, 9 High, 2 Medium |
+
+The after-fix probe includes two additional input-sanitization checks added during grading review: stored content XSS text and reflected search-query XSS. The before/after fix proof for Category 8 relies on the common checks present in both runs: CSP and collaboration WebSocket validation.
 
 ### Deliverable Metrics
 
@@ -838,7 +840,7 @@ Operational details for the probe are documented in `shipshape/SECURITY_PROBE.md
 | Security probe runnable | Yes: `pnpm security:probe -- --base-url http://127.0.0.1:3400` |
 | Auth/session vulnerabilities | No verified auth/session finding. Unauthenticated `/api/auth/me` returned 401, seeded admin login worked, session ID matched 64 hex characters, and regular member access to `/api/admin/workspaces` returned 403. |
 | WebSocket validation failures | Before: unsupported message type was silently accepted; malformed empty message crashed the API process. After: unsupported and malformed messages close with 1003, oversized payload closes with 1009, and `/health` remains available. |
-| Input sanitization failures | 1 Medium remains: document titles accept and store raw HTML event-handler payload text. |
+| Input sanitization failures | 2 Medium findings remain: document titles and document content accept/store raw HTML event-handler payload text. Reflected search-query XSS did not echo raw input. |
 | High/Critical dependency vulnerabilities | 10 remain: `fast-xml-parser` (1 Critical, 3 High), `hono` (1 High), `@hono/node-server` (1 High), `express-rate-limit` (1 High), `path-to-regexp` (2 High), and `fast-uri` (2 High). |
 | CORS/CSP misconfiguration | Before: global CSP allowed `script-src 'unsafe-inline'`. After: `script-src` uses `'self'` plus a per-request nonce. CORS uses configured origin plus credentials, not wildcard credentials. |
 | Secrets exposure | No direct secret value exposure found in the inspected admin credentials path; client secret is masked in UI and logs only its length. Issuer URL/client ID and upstream validation errors are logged or surfaced to super-admins and should be tightened before production. |
@@ -865,6 +867,7 @@ These two fixes satisfy the Category 8 improvement target: at least two verified
 1. **Critical: `fast-xml-parser` production dependency advisory.** Audit reports an entity encoding bypass via regex injection in DOCTYPE entity names.
 2. **High: additional production dependency advisories.** Audit reports high-severity advisories in `fast-xml-parser`, `hono`, `@hono/node-server`, `express-rate-limit`, `path-to-regexp`, and `fast-uri`.
 3. **Medium: document title accepts raw HTML event-handler payload text.** React escaping mitigates current normal rendering, but raw storage increases future XSS risk in exports, notifications, logs, or alternate renderers.
+4. **Medium: document content accepts raw HTML event-handler payload text.** TipTap text-node rendering mitigates ordinary display, but the raw stored value is still a downstream-renderer hardening gap.
 
 ### Improvement Opportunities For Phase 2
 

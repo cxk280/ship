@@ -8,7 +8,7 @@ The probe covers the eighth audit category from `Shipshape - Security Audit.pdf`
 
 - **Auth and session management:** unauthenticated protected-route access, seeded admin login, session cookie entropy format, and regular-member access to a super-admin route.
 - **WebSocket validation:** unauthenticated collaboration socket rejection, unsupported message type handling, malformed message handling, and oversized payload handling.
-- **Input sanitization:** stored document-title XSS payload acceptance, long-title validation, and SQL-like title handling.
+- **Input sanitization:** stored document-title XSS payload acceptance, stored document-content XSS payload acceptance, reflected search-query XSS, long-title validation, and SQL-like title handling.
 - **Dependency vulnerabilities:** production `npm audit --omit=dev` with `pnpm audit --prod` fallback when npm has no lockfile.
 - **Manual-review support:** CSP/CORS header checks are automated; secrets handling, rate limiting, and verbose error leakage are reviewed against source plus probe output.
 
@@ -64,7 +64,7 @@ Current before/after evidence is stored in:
 
 Before the Category 8 fixes, the probe reported `14` findings: `2` Critical, `11` High, and `1` Medium. The verified issues included global `script-src 'unsafe-inline'`, unsupported WebSocket messages being silently accepted, and malformed collaboration messages crashing the API process.
 
-After the fixes, the probe reported `11` findings: `1` Critical, `9` High, and `1` Medium. The closed findings are:
+After the fixes, the current enhanced probe reported `12` findings: `1` Critical, `9` High, and `2` Medium. The closed findings are:
 
 - Global CSP no longer allows inline scripts. The app now emits a per-request nonce in `script-src`, and the admin credentials page applies that nonce to its inline script.
 - Unsupported collaboration message types now close with WebSocket code `1003`.
@@ -78,6 +78,7 @@ Remaining open findings:
 | Critical | Dependencies | `fast-xml-parser` entity encoding bypass advisory. |
 | High | Dependencies | Nine additional production dependency advisories across `fast-xml-parser`, `hono`, `@hono/node-server`, `express-rate-limit`, `path-to-regexp`, and `fast-uri`. |
 | Medium | Input sanitization | Document titles accept and store raw HTML event-handler payload text. React escaping reduces immediate rendering risk, but downstream renderers, notifications, exports, and logs could reintroduce XSS exposure. |
+| Medium | Input sanitization | Document content accepts and stores raw HTML event-handler payload text. TipTap text-node rendering reduces immediate rendering risk, but exported/previews/search snippets/future renderers could reintroduce XSS exposure. |
 
 ## Manual Review Notes
 

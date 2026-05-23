@@ -1,6 +1,6 @@
 {
   "tool": "shipshape-security-probe",
-  "startedAt": "2026-05-23T15:40:47.134Z",
+  "startedAt": "2026-05-23T15:51:24.730Z",
   "target": "http://127.0.0.1:3400",
   "findings": [
     {
@@ -15,8 +15,38 @@
       ],
       "evidence": {
         "status": 201,
-        "id": "a330b35b-9654-4707-8765-f4f0712cbf74",
+        "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d",
         "title": "<img src=x onerror=alert('shipshape')>"
+      },
+      "status": "open"
+    },
+    {
+      "category": "input-sanitization",
+      "severity": "medium",
+      "title": "Document content accepts raw HTML event-handler payload text",
+      "description": "TipTap text rendering usually escapes text nodes, but storing raw script-like content increases downstream XSS risk in exports, previews, search snippets, notifications, and future renderers.",
+      "reproductionSteps": [
+        "Login as dev@ship.local",
+        "PATCH http://127.0.0.1:3400/api/documents/0cdcbd0e-db2d-41b6-a02a-403ec1c5918d/content with a TipTap text node containing <svg onload=alert('shipshape-content')>",
+        "Observe the raw payload returned and stored in document content"
+      ],
+      "evidence": {
+        "status": 200,
+        "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d",
+        "content": {
+          "type": "doc",
+          "content": [
+            {
+              "type": "paragraph",
+              "content": [
+                {
+                  "text": "<svg onload=alert('shipshape-content')>",
+                  "type": "text"
+                }
+              ]
+            }
+          ]
+        }
       },
       "status": "open"
     },
@@ -207,7 +237,7 @@
       "name": "CSP script-src does not allow unsafe-inline",
       "status": "pass",
       "details": {
-        "csp": "default-src 'self';script-src 'self' 'nonce-KaG1e+b15fRlflWTPpk2iw==';style-src 'self' 'unsafe-inline';img-src 'self' data: blob: https:;connect-src 'self' wss: ws:;font-src 'self' data:;object-src 'none';frame-src 'none';base-uri 'self';form-action 'self';frame-ancestors 'self';script-src-attr 'none';upgrade-insecure-requests"
+        "csp": "default-src 'self';script-src 'self' 'nonce-HZ+/5c35OFd109H5gAFHRQ==';style-src 'self' 'unsafe-inline';img-src 'self' data: blob: https:;connect-src 'self' wss: ws:;font-src 'self' data:;object-src 'none';frame-src 'none';base-uri 'self';form-action 'self';frame-ancestors 'self';script-src-attr 'none';upgrade-insecure-requests"
       }
     },
     {
@@ -274,7 +304,26 @@
       "details": {
         "status": 201,
         "acceptedRawPayload": true,
-        "id": "a330b35b-9654-4707-8765-f4f0712cbf74"
+        "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d"
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Stored XSS content payload rejected or sanitized",
+      "status": "fail",
+      "details": {
+        "status": 200,
+        "acceptedRawPayload": true,
+        "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d"
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Reflected XSS search query is not echoed raw",
+      "status": "pass",
+      "details": {
+        "status": 200,
+        "reflectedRawPayload": false
       }
     },
     {
@@ -307,7 +356,7 @@
       "status": "pass",
       "details": {
         "status": 201,
-        "id": "476b02aa-86f8-41e5-839a-89b6a62934e9"
+        "id": "307a4f94-2a28-4013-84a7-2ec69234f504"
       }
     },
     {
@@ -372,20 +421,20 @@
     }
   ],
   "summary": {
-    "totalChecks": 14,
-    "passedChecks": 13,
-    "failedChecks": 1,
+    "totalChecks": 16,
+    "passedChecks": 14,
+    "failedChecks": 2,
     "skippedChecks": 0,
-    "totalFindings": 11,
+    "totalFindings": 12,
     "bySeverity": {
-      "medium": 1,
+      "medium": 2,
       "critical": 1,
       "high": 9
     },
     "byCategory": {
-      "input-sanitization": 1,
+      "input-sanitization": 2,
       "dependencies": 10
     }
   },
-  "completedAt": "2026-05-23T15:40:50.652Z"
+  "completedAt": "2026-05-23T15:51:28.083Z"
 }

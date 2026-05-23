@@ -1,14 +1,14 @@
 # ShipShape Security Probe Report
 
 Target: `http://127.0.0.1:3400`
-Started: 2026-05-23T15:40:47.134Z
-Completed: 2026-05-23T15:40:50.652Z
+Started: 2026-05-23T15:51:24.730Z
+Completed: 2026-05-23T15:51:28.083Z
 
 ## Summary
 
-- Checks: 13/14 passed, 1 failed, 0 skipped
-- Findings: 11
-- By severity: `{"medium":1,"critical":1,"high":9}`
+- Checks: 14/16 passed, 2 failed, 0 skipped
+- Findings: 12
+- By severity: `{"medium":2,"critical":1,"high":9}`
 
 ## Findings
 
@@ -26,8 +26,40 @@ Completed: 2026-05-23T15:40:50.652Z
 ```json
 {
   "status": 201,
-  "id": "a330b35b-9654-4707-8765-f4f0712cbf74",
+  "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d",
   "title": "<img src=x onerror=alert('shipshape')>"
+}
+```
+
+### MEDIUM: Document content accepts raw HTML event-handler payload text
+
+- Category: `input-sanitization`
+- Status: `open`
+- Description: TipTap text rendering usually escapes text nodes, but storing raw script-like content increases downstream XSS risk in exports, previews, search snippets, notifications, and future renderers.
+- Reproduction steps:
+  - Login as dev@ship.local
+  - PATCH http://127.0.0.1:3400/api/documents/0cdcbd0e-db2d-41b6-a02a-403ec1c5918d/content with a TipTap text node containing <svg onload=alert('shipshape-content')>
+  - Observe the raw payload returned and stored in document content
+- Evidence:
+
+```json
+{
+  "status": 200,
+  "id": "0cdcbd0e-db2d-41b6-a02a-403ec1c5918d",
+  "content": {
+    "type": "doc",
+    "content": [
+      {
+        "type": "paragraph",
+        "content": [
+          {
+            "text": "<svg onload=alert('shipshape-content')>",
+            "type": "text"
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 
@@ -242,6 +274,8 @@ Completed: 2026-05-23T15:40:50.652Z
 | auth-session | Session token entropy format | pass |
 | auth-session | Member privilege escalation to super-admin route | pass |
 | input-sanitization | Stored XSS title payload rejected or sanitized | fail |
+| input-sanitization | Stored XSS content payload rejected or sanitized | fail |
+| input-sanitization | Reflected XSS search query is not echoed raw | pass |
 | input-sanitization | Excessively long document title rejected | pass |
 | input-sanitization | SQL injection title payload does not cause server error | pass |
 | dependencies | Dependency vulnerability audit parsed | pass |

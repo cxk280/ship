@@ -108,6 +108,15 @@ function addFinding({ category, severity, title, description, reproductionSteps,
   report.findings.push({ category, severity, title, description, reproductionSteps, evidence, status });
 }
 
+function containsStringDeep(value, needle) {
+  if (typeof value === 'string') return value.includes(needle);
+  if (Array.isArray(value)) return value.some((item) => containsStringDeep(item, needle));
+  if (value && typeof value === 'object') {
+    return Object.values(value).some((item) => containsStringDeep(item, needle));
+  }
+  return false;
+}
+
 async function getCsrf(jar) {
   const result = await request('/api/csrf-token', {}, jar);
   if (result.status !== 200 || !result.body?.token) {
@@ -236,6 +245,73 @@ async function runInputChecks(admin) {
         'Observe the raw payload returned and stored as the document title',
       ],
       evidence: { status: xssCreate.status, id: xssCreate.body?.id, title: xssCreate.body?.title },
+    });
+  }
+
+  if (xssCreate.body?.id) {
+    const contentPayload = `<svg onload=alert('shipshape-content')>`;
+    const contentProbe = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: contentPayload }],
+        },
+      ],
+    };
+    const contentUpdate = await request(`/api/documents/${xssCreate.body.id}/content`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-csrf-token': csrf,
+      },
+      body: JSON.stringify({ content: contentProbe }),
+    }, admin.jar);
+    const acceptedRawContentPayload = containsStringDeep(contentUpdate.body?.content, contentPayload);
+    addCheck('input-sanitization', 'Stored XSS content payload rejected or sanitized', contentUpdate.status >= 400 || !acceptedRawContentPayload ? 'pass' : 'fail', {
+      status: contentUpdate.status,
+      acceptedRawPayload: acceptedRawContentPayload,
+      id: xssCreate.body.id,
+    });
+    if (contentUpdate.status < 400 && acceptedRawContentPayload) {
+      addFinding({
+        category: 'input-sanitization',
+        severity: 'medium',
+        title: 'Document content accepts raw HTML event-handler payload text',
+        description: 'TipTap text rendering usually escapes text nodes, but storing raw script-like content increases downstream XSS risk in exports, previews, search snippets, notifications, and future renderers.',
+        reproductionSteps: [
+          `Login as ${adminEmail}`,
+          `PATCH ${baseUrl}/api/documents/${xssCreate.body.id}/content with a TipTap text node containing ${contentPayload}`,
+          'Observe the raw payload returned and stored in document content',
+        ],
+        evidence: { status: contentUpdate.status, id: xssCreate.body.id, content: contentUpdate.body?.content },
+      });
+    }
+  } else {
+    addCheck('input-sanitization', 'Stored XSS content payload rejected or sanitized', 'skip', {
+      reason: 'No created document ID available for content probe',
+    });
+  }
+
+  const reflectedPayload = `<script>alert('shipshape-reflected')</script>`;
+  const reflectedSearch = await request(`/api/search/mentions?q=${encodeURIComponent(reflectedPayload)}`, {}, admin.jar);
+  const reflectedRawPayload = reflectedSearch.text.includes(reflectedPayload);
+  addCheck('input-sanitization', 'Reflected XSS search query is not echoed raw', reflectedSearch.status < 500 && !reflectedRawPayload ? 'pass' : 'fail', {
+    status: reflectedSearch.status,
+    reflectedRawPayload,
+  });
+  if (reflectedRawPayload) {
+    addFinding({
+      category: 'input-sanitization',
+      severity: 'high',
+      title: 'Search endpoint reflects raw XSS payload',
+      description: 'Reflected user input in API responses can become exploitable when rendered by clients, logs, or downstream integrations without escaping.',
+      reproductionSteps: [
+        `Login as ${adminEmail}`,
+        `GET ${baseUrl}/api/search/mentions?q=${encodeURIComponent(reflectedPayload)}`,
+        'Observe the raw payload in the response body',
+      ],
+      evidence: { status: reflectedSearch.status, response: reflectedSearch.body },
     });
   }
 
