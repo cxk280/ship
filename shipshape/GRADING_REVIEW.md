@@ -34,7 +34,7 @@ The technical audit and implementation evidence are strong, but the submission i
 | Severity rubric requested by feedback | Pass | `SHIPSHAPE_AUDIT_REPORT.md` opens with a Critical/High/Medium/Low rubric. |
 | Deck updated | Pass | `shipshape/ShipShape_Demo_Deck.pptx` includes a Category 8 Security Audit slide. |
 | AI cost analysis | Partial after grading fix | `shipshape/AI_COST_ANALYSIS.md` now exists, but exact dollar spend was not captured in the repo. A strict grader may require exported billing/token data. |
-| Deployed application | Not evidenced | Deployment docs exist, but no public deployed URL or health-check proof is present in the repo. |
+| Deployed application | Pass | Railway deployment evidence is now recorded in `shipshape/RAILWAY_DEPLOYMENT.md`, including public URL, resource IDs, health check, setup status, and verified demo login. |
 | Demo video | Not evidenced | `shipshape/DEMO_VIDEO_OUTLINE.md` now exists, but no recording URL is present. |
 | Social post tagging `@GauntletAI` | Not evidenced | `shipshape/SOCIAL_POST_DRAFT.md` now exists, but no published URL is present. |
 | Commit discipline | Pass | Work is on `shipshape-implementation` with descriptive commits and pushed to both remotes as of this review. |
@@ -53,12 +53,11 @@ The technical audit and implementation evidence are strong, but the submission i
 
 ## Brutal Remaining Risks
 
-1. **Deployment proof is absent.** A final submission should include the public app URL and a timestamped health check. Without that, the "deployed application" checkbox is not satisfied.
-2. **Demo video proof is absent.** A script outline is not a video. The final submission needs a 3-5 minute recording URL.
-3. **Social post proof is absent.** A draft is not a post. The final submission needs a URL to X or LinkedIn tagging `@GauntletAI`.
-4. **AI cost analysis lacks exact spend.** The repo did not preserve a token/cost ledger. The new file is honest, but a stronger submission should attach billing export or manual per-session estimates.
-5. **API performance has one arguable endpoint.** The team-grid improvement is clean; the wiki-list improvement is a summary-contract improvement. To remove grader discretion, add a second identical-endpoint P95 win or re-benchmark the full wiki list after a pure backend optimization.
-6. **Screen-reader pass is not literal.** The accessibility-tree fallback is useful, but the feedback asked for real VoiceOver or NVDA. A human pass should be recorded with page names, control announcements, blank announcements, and landmark navigation notes.
+1. **Demo video proof is absent.** A script outline is not a video. The final submission needs a 3-5 minute recording URL.
+2. **Social post proof is absent.** A draft is not a post. The final submission needs a URL to X or LinkedIn tagging `@GauntletAI`.
+3. **AI cost analysis lacks exact spend.** The repo did not preserve a token/cost ledger. The new file is honest, but a stronger submission should attach billing export or manual per-session estimates.
+4. **API performance has one arguable endpoint.** The team-grid improvement is clean; the wiki-list improvement is a summary-contract improvement. To remove grader discretion, add a second identical-endpoint P95 win or re-benchmark the full wiki list after a pure backend optimization.
+5. **Screen-reader pass is not literal.** The accessibility-tree fallback is useful, but the feedback asked for real VoiceOver or NVDA. A human pass should be recorded with page names, control announcements, blank announcements, and landmark navigation notes.
 
 ## Instructor Grade If Submitted Exactly As Repo Evidence
 
