@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import crypto from 'crypto';
+import { join } from 'path';
 import { csrfSync } from 'csrf-sync';
 import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth.js';
@@ -246,6 +247,17 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   initializeCAIA().catch((err) => {
     console.warn('CAIA initialization failed:', err);
   });
+
+  if (process.env.WEB_DIST_DIR) {
+    const webDistDir = process.env.WEB_DIST_DIR;
+    app.use(express.static(webDistDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path === '/health') {
+        return next();
+      }
+      res.sendFile(join(webDistDir, 'index.html'));
+    });
+  }
 
   return app;
 }

@@ -21,7 +21,10 @@ config({ path: join(__dirname, '../.env') });
 
 async function main() {
   // Load secrets from SSM in production (before importing app)
-  if (process.env.NODE_ENV === 'production') {
+  const shouldLoadSsm = process.env.NODE_ENV === 'production'
+    && process.env.LOAD_SSM !== 'false'
+    && !process.env.RAILWAY_ENVIRONMENT;
+  if (shouldLoadSsm) {
     const { loadProductionSecrets } = await import('./config/ssm.js');
     await loadProductionSecrets();
   }
