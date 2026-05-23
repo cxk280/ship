@@ -1,12 +1,19 @@
 import { useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { UnifiedEditor } from '@/components/UnifiedEditor';
 import type { UnifiedDocument, SidebarData } from '@/components/UnifiedEditor';
 import { useAuth } from '@/hooks/useAuth';
 import { useAssignableMembersQuery } from '@/hooks/useTeamMembersQuery';
-import { apiPatch, apiDelete } from '@/lib/api';
+import { useIssuesQuery } from '@/hooks/useIssuesQuery';
+import { apiGet, apiPatch, apiDelete } from '@/lib/api';
+import { cn } from '@/lib/cn';
 import type { DocumentTabProps } from '@/lib/document-tabs';
+
+interface ProgramProjectSummary {
+  id: string;
+  title: string;
+}
 
 /**
  * ProgramOverviewTab - Renders the program document in the UnifiedEditor
@@ -26,6 +33,17 @@ export default function ProgramOverviewTab({ documentId, document }: DocumentTab
     name: m.name,
     email: m.email || '',
   })), [teamMembersData]);
+  const { data: issues = [] } = useIssuesQuery({ programId: documentId });
+  const { data: projects = [] } = useQuery<ProgramProjectSummary[]>({
+    queryKey: ['program-projects', documentId],
+    queryFn: async () => {
+      const response = await apiGet(`/api/programs/${documentId}/projects`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch projects');
+      }
+      return response.json();
+    },
+  });
 
   // Update mutation with optimistic updates
   const updateMutation = useMutation({
@@ -99,6 +117,35 @@ export default function ProgramOverviewTab({ documentId, document }: DocumentTab
     people: teamMembers,
   }), [teamMembers]);
 
+  const programSummary = useMemo(() => {
+    const totalIssues = issues.length;
+    const completedIssues = issues.filter(issue => issue.state === 'done' || Boolean(issue.completed_at)).length;
+    const openIssues = totalIssues - completedIssues;
+    const highPriorityOpenIssues = issues.filter(issue => (
+      issue.state !== 'done'
+      && !issue.completed_at
+      && ['high', 'critical'].includes(issue.priority)
+    )).length;
+    const completionPercent = totalIssues > 0 ? Math.round((completedIssues / totalIssues) * 100) : 0;
+    const owner = teamMembers.find(member => member.id === document.owner_id || member.user_id === document.owner_id);
+    const health = highPriorityOpenIssues > 0
+      ? 'At risk'
+      : completionPercent >= 75
+        ? 'On track'
+        : 'Needs attention';
+
+    return {
+      totalIssues,
+      completedIssues,
+      openIssues,
+      highPriorityOpenIssues,
+      completionPercent,
+      ownerName: owner?.name ?? 'Unassigned',
+      projectCount: projects.length,
+      health,
+    };
+  }, [document.owner_id, issues, projects.length, teamMembers]);
+
   // Transform to UnifiedDocument format
   const unifiedDocument: UnifiedDocument = useMemo(() => ({
     id: document.id,
@@ -120,14 +167,57 @@ export default function ProgramOverviewTab({ documentId, document }: DocumentTab
   if (!user) return null;
 
   return (
-    <UnifiedEditor
-      document={unifiedDocument}
-      sidebarData={sidebarData}
-      onUpdate={handleUpdate}
-      onBack={handleBack}
-      backLabel="programs"
-      onDelete={handleDelete}
-      showTypeSelector={false}
-    />
+    <div className="flex h-full flex-col overflow-hidden">
+      <section
+        aria-label="Program health summary"
+        className="border-b border-border bg-background px-4 py-3"
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <SummaryMetric label="Owner" value={programSummary.ownerName} muted={programSummary.ownerName === 'Unassigned'} />
+          <SummaryMetric label="Health" value={programSummary.health} tone={programSummary.health === 'At risk' ? 'risk' : undefined} />
+          <SummaryMetric label="Projects" value={String(programSummary.projectCount)} />
+          <SummaryMetric label="Completion" value={`${programSummary.completionPercent}%`} detail={`${programSummary.completedIssues}/${programSummary.totalIssues} issues done`} />
+          <SummaryMetric label="Open high priority" value={String(programSummary.highPriorityOpenIssues)} detail={`${programSummary.openIssues} open total`} tone={programSummary.highPriorityOpenIssues > 0 ? 'risk' : undefined} />
+        </div>
+      </section>
+      <div className="min-h-0 flex-1">
+        <UnifiedEditor
+          document={unifiedDocument}
+          sidebarData={sidebarData}
+          onUpdate={handleUpdate}
+          onBack={handleBack}
+          backLabel="programs"
+          onDelete={handleDelete}
+          showTypeSelector={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SummaryMetric({
+  label,
+  value,
+  detail,
+  tone,
+  muted,
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: 'risk';
+  muted?: boolean;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface px-3 py-2">
+      <div className="text-xs font-medium uppercase text-muted">{label}</div>
+      <div className={cn(
+        'mt-1 truncate text-sm font-semibold',
+        tone === 'risk' ? 'text-amber-400' : muted ? 'text-muted' : 'text-foreground'
+      )}>
+        {value}
+      </div>
+      {detail && <div className="mt-0.5 truncate text-xs text-muted">{detail}</div>}
+    </div>
   );
 }

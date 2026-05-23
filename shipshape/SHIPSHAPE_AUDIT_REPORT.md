@@ -4,6 +4,10 @@ Audit date: 2026-05-18
 
 Scope rule: this report is diagnosis only. No product-code fixes were made while collecting these baselines.
 
+## Severity Rubric
+
+**Critical** findings are issues that can produce data loss/corruption, unauthorized access, server 500s from ordinary malformed input, unusable core workflows, or blocking accessibility failures on primary product surfaces. **High** findings are likely user-facing regressions or scalability/security/accessibility risks on important workflows, but with a workaround or narrower blast radius than Critical. **Medium** findings are correctness, maintainability, performance, or usability issues that are real but either intermittent, secondary-path, or unlikely to block the MVP by themselves. **Low** findings are polish, diagnostics, local developer-experience, or future-risk items that should be tracked but do not materially change Phase 2 release triage unless they cluster with higher-severity problems.
+
 ## Measurement Summary
 
 The Week 4 audit requires each category to describe the tools, commands, and methodology used before presenting baseline numbers. Each category below includes a detailed `Methodology` section; this table is the quick map.
@@ -421,6 +425,18 @@ No explicit `test.skip`, `it.skip`, `describe.skip`, `skipIf`, `runIf`, `.only`,
 | `PLAYWRIGHT_WORKERS=1 npx pnpm@10.27.0 exec playwright test --list` | Passed | 22s | Listed 869 tests in 71 files; did not execute browsers. |
 | `npx pnpm@10.27.0 --filter @ship/api test:coverage` | Failed | 4s | Coverage could not start: missing `@vitest/coverage-v8`. |
 
+### Test Suite Summary Addendum
+
+Current verification on 2026-05-23 used `pnpm` 10.27.0 and saved logs under `/tmp`.
+
+| Run | Command | Result | Files | Tests | Pass/Fail/Skipped | Runtime | Tests That Flipped |
+|---:|---|---|---:|---:|---|---:|---|
+| 1 | `DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_test_audit pnpm --filter @ship/api test` | Failed in setup | 29 failed suites | 465 | 0 passed / 29 suites failed / 465 skipped | 24.74s | None executed; local Postgres was not listening on `127.0.0.1:5433`. |
+| 2 | `pnpm --filter @ship/web test` | Passed | 19 passed | 157 | 157 passed / 0 failed / 0 skipped | 19.12s | The previously red web suite is now green. `document-tabs.test.ts`, `useSessionTimeout.test.ts`, and `DetailsExtension.test.ts` no longer fail. |
+| 3 | `DATABASE_URL=postgres://ship@127.0.0.1:5433/ship_test_audit pnpm --filter @ship/api test` | Passed | 29 passed | 465 | 465 passed / 0 failed / 0 skipped | 28.75s | API flipped from all-suite setup failure to green after starting local Postgres, applying migrations, and using the reachable test `DATABASE_URL`. |
+
+The API run required a local Postgres instance initialized with `LANG=C LC_ALL=C initdb`, started on port `5433`, followed by `pnpm --filter @ship/api db:migrate`. The first failure is therefore classified as environment setup fragility, not a product test failure.
+
 ### Failing Web Tests
 
 | File | Failed Tests | Failure Pattern |
@@ -431,10 +447,18 @@ No explicit `test.skip`, `it.skip`, `describe.skip`, `skipIf`, `runIf`, `.only`,
 
 ### Coverage Status
 
-- API coverage is configured in `api/vitest.config.ts` with provider `v8`, but the required `@vitest/coverage-v8` dependency is missing, so no coverage percentage is currently available from the checked-in script.
-- Web Vitest has no coverage configuration and no `test:coverage` script.
+- `@vitest/coverage-v8` is now installed for both `@ship/api` and `@ship/web`, so each workspace can run its own `test:coverage` script without relying on a root-only dev dependency.
+- API and web Vitest both use the V8 provider and emit `text`, `html`, `json`, and `json-summary` coverage reports.
 - Playwright is configured for retries, traces on first retry, screenshots on failure, HTML reporting, and a custom progress reporter, but coverage collection is not configured for E2E.
-- Current repository state therefore cannot answer "what percent is covered?" without first fixing coverage tooling.
+
+Current coverage results from 2026-05-23:
+
+| Workspace | Command | Result | Runtime | Statement Coverage | Line Coverage | Branch Coverage | Function Coverage |
+|---|---|---|---:|---:|---:|---:|---:|
+| API | `DATABASE_URL=postgres://ship@127.0.0.1:5433/ship_test_audit pnpm --filter @ship/api test:coverage` | Passed | 35.93s | 41.11% | 41.29% | 34.33% | 41.43% |
+| Web | `pnpm --filter @ship/web test:coverage` | Passed | 18.04s | 27.21% | 28.10% | 16.60% | 22.48% |
+
+The reports were written to `api/coverage/coverage-summary.json` and `web/coverage/coverage-summary.json`.
 
 ### Critical Flow Coverage
 
@@ -707,7 +731,38 @@ Existing positive signals:
 
 Screen reader note:
 
-- A manual VoiceOver/NVDA pass was not completed in this audit run. Axe landmark/role failures are still strong screen-reader risk indicators, especially the tree/list structure and missing login landmarks.
+- A real VoiceOver pass was attempted on macOS with AppleScript (`tell application "VoiceOver" to activate` and a spoken-output smoke command), but VoiceOver did not respond from this non-interactive shell before timeout. NVDA is Windows-only and was not available in this environment.
+- As a fallback, I ran a Chrome accessibility-tree pass against the same axe-tested pages on the local built app with `ship:disableActionItemsModal=true`, recording unlabeled controls, literal "blank" text nodes, and landmarks. This is not a substitute for a human VoiceOver/NVDA pass, but it does exercise the browser accessibility tree that screen readers consume.
+
+### Accessibility Addendum: Current Axe and Accessibility Tree Pass
+
+Current local axe scan on 2026-05-23:
+
+| Page | Axe Violations | Critical/Serious | Notes |
+|---|---:|---:|---|
+| Login | 0 | 0 | No axe violations. |
+| Docs | 0 | 0 | Previously flagged tree/list and landmark issues are not present in this scan. |
+| Document editor | 0 | 0 | Previously flagged editor/tree issues are not present in this scan. |
+| Issues | 0 | 0 | No axe violations. |
+| Projects | 1 | 1 | Serious `color-contrast`, 16 affected nodes. |
+| Programs | 0 | 0 | No axe violations. |
+| Team allocation | 0 | 0 | No axe violations. |
+| My Week | 1 | 1 | Serious `color-contrast`, 8 affected nodes. |
+
+Chrome accessibility-tree pass:
+
+| Page | Unlabeled Controls | "Blank" Announcements | Landmark Result |
+|---|---:|---:|---|
+| Login | 0 | 0 | `main` present, unnamed. |
+| Docs | 0 | 0 | `navigation: Primary navigation`, `complementary: Document list`, `main`, and `complementary: Document properties` present. |
+| Document editor | 0 | 0 | Same four app-shell landmarks present. |
+| Issues | 0 | 0 | Same four app-shell landmarks present. |
+| Projects | 0 | 0 | Same four app-shell landmarks present. |
+| Programs | 0 | 0 | Same four app-shell landmarks present. |
+| Team allocation | 0 | 0 | Same four app-shell landmarks present. |
+| My Week | 0 | 0 | Same four app-shell landmarks present. |
+
+Important screen-reader risk that remains after the fallback pass: the global accountability banner is the first announced control on authenticated pages and has a long accessible name (`2 overdue accountability items need attention. 2 View items`). It is labeled, but it may be noisy before users reach primary navigation or page content. A human VoiceOver/NVDA pass should still confirm reading order, rotor landmark names, and whether the unnamed `main` landmark is acceptable or should receive route-specific labels.
 
 ### Color Contrast
 
@@ -759,11 +814,11 @@ Current closed stretch gates:
 
 - API latency: seeded 50-concurrency benchmark improved wiki document listing from `1,210ms` P95 to `198ms` P95 and team accountability grid from `1,818ms` P95 to `119ms` P95.
 - Database query efficiency: the audited main-page flow now measures `25` SQL queries versus the `33` baseline and `26` stretch target.
-- Accessibility: the new stretch axe spec passes with 0 Critical/Serious violations across Login, Docs, Document Editor, Projects, Team, and My Week after fixing Team and My Week current-week contrast failures.
+- Accessibility: structural Critical/Serious axe failures for Login, Docs, Document Editor, Issues, Programs, and Team are closed in the 2026-05-23 local scan. Projects and My Week still have Serious color-contrast findings and should remain open for Phase 2 triage.
 
 Current closed coverage gate:
 
-- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks each changed production file against the 80% changed-line threshold. Current result: `372/372` changed executable unit lines covered, `100.00%` overall. Team, My Week, and heatmap visual contrast changes are verified by the Playwright axe stretch spec rather than unit coverage.
+- Changed-file coverage is now enforced by `test:coverage:changed`, which runs API and web coverage and then checks each changed production file against the 80% changed-line threshold. Current result: `372/372` changed executable unit lines covered, `100.00%` overall. Current accessibility verification should use the local axe addendum above until the Playwright stretch spec can complete again under adequate Docker/memory conditions.
 - The remaining low overall package-coverage risk is controlled by `scripts/check-coverage-ratchet.mjs`, also wired into `test:coverage:changed`. The ratchet fails if API or web package coverage drops below the current baseline floor while future work raises the floor over time.
 - Type safety now satisfies the Kickoff denominator: the audit's core total (`any + as + non-null + TS directives`) is down from `1281` to `949`, a `25.92%` reduction.
 - Runtime error handling now has direct regression coverage for the Documents list error state and offline backlinks behavior; process-level handlers are documented as diagnostic work, not counted as a user-facing runtime fix.

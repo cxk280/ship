@@ -39,6 +39,8 @@ import { ProjectContextSidebar } from '@/components/sidebars/ProjectContextSideb
 
 type Mode = 'docs' | 'issues' | 'projects' | 'programs' | 'sprints' | 'team' | 'settings' | 'dashboard' | 'project-context';
 
+const ACTION_ITEMS_MODAL_DISMISSED_KEY = 'ship:actionItemsModalDismissedThisSession';
+
 export function AppLayout() {
   const { user, logout, isSuperAdmin, impersonating, endImpersonation } = useAuth();
   const { currentWorkspace, workspaces, switchWorkspace } = useWorkspace();
@@ -118,11 +120,17 @@ export function AppLayout() {
   // Disabled when localStorage flag is set (used by E2E tests to avoid blocking interactions)
   useEffect(() => {
     if (localStorage.getItem('ship:disableActionItemsModal') === 'true') return;
+    if (sessionStorage.getItem(ACTION_ITEMS_MODAL_DISMISSED_KEY) === 'true') return;
     if (!actionItemsModalShownOnLoad && hasActionItems && actionItemsData?.items) {
       setActionItemsModalOpen(true);
       setActionItemsModalShownOnLoad(true);
     }
   }, [actionItemsModalShownOnLoad, hasActionItems, actionItemsData?.items]);
+
+  const closeActionItemsModal = useCallback(() => {
+    sessionStorage.setItem(ACTION_ITEMS_MODAL_DISMISSED_KEY, 'true');
+    setActionItemsModalOpen(false);
+  }, []);
 
   // Accessibility: focus management on navigation
   useFocusOnNavigate();
@@ -573,7 +581,7 @@ export function AppLayout() {
       {/* Action Items Modal - shows on login when user has pending accountability tasks */}
       <ActionItemsModal
         open={actionItemsModalOpen}
-        onClose={() => setActionItemsModalOpen(false)}
+        onClose={closeActionItemsModal}
       />
     </div>
     </SelectionPersistenceProvider>
