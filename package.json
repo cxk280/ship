@@ -27,6 +27,7 @@
     "test": "pnpm --filter @ship/api test",
     "test:coverage": "DATABASE_URL=${DATABASE_URL:-postgres://ship:ship_dev_password@localhost:5433/ship_dev} pnpm --filter @ship/api test:coverage && pnpm --filter @ship/web test:coverage",
     "test:coverage:changed": "pnpm test:coverage && node scripts/check-changed-coverage.mjs && node scripts/check-coverage-ratchet.mjs",
+    "security:probe": "node scripts/security-probe.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "worktree:init": "./scripts/worktree-init.sh",
@@ -49,6 +50,7 @@
     "supertest": "^7.1.4",
     "testcontainers": "^11.11.0",
     "typescript": "^5.7.2",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "ws": "^8.19.0"
   }
 }

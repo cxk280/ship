@@ -21,6 +21,7 @@ The Week 4 audit requires each category to describe the tools, commands, and met
 | Test Coverage and Quality | Test script/config review, static and runtime test inventory, API and web Vitest runs, Playwright test listing, skip/focus scans, and API coverage command attempt. |
 | Runtime Error and Edge Cases | Local API/web servers against seeded data, Playwright-driven browser probes, console/page/request/server-log capture, malformed input tests, offline/reconnect checks, concurrency checks, and static error-boundary review. |
 | Accessibility Compliance | `@axe-core/playwright` scans, Lighthouse accessibility audits, keyboard smoke testing, and source/test review for ARIA, focus, and keyboard patterns. |
+| Security Audit | Runnable `pnpm security:probe` active checks against seeded local API, production dependency audit parsing, source review for CORS/CSP/secrets/rate limits/error leakage, and before/after proof for verified fixes. |
 
 ## 1. Type Safety
 
@@ -805,6 +806,72 @@ The dominant issue is not missing labels on icon buttons; it is invalid or incom
 - Rework selection table headers so the selection column has accessible text without triggering empty-header violations.
 - Verify skip-link focus and command palette shortcut behavior manually, then add regression tests if either is broken.
 - For exceeding the benchmark later: target **0 Critical/Serious axe violations** on Login, Docs, Document Editor, Projects, Team, and My Week, plus Lighthouse accessibility scores of **100** on Docs and My Week.
+
+## Category 8: Security Audit
+
+### Methodology
+
+- Carefully read `~/code/gauntlet/Shipshape - Security Audit.pdf` and treated it as the eighth audit category.
+- Built a runnable active probe at `scripts/security-probe.mjs`, wired as `pnpm security:probe`.
+- Ran the probe against a seeded local API on `http://127.0.0.1:3400`.
+- Stored before/after evidence in:
+  - `shipshape/shipshape-evidence/security-probe-before.json`
+  - `shipshape/shipshape-evidence/security-probe-before.md`
+  - `shipshape/shipshape-evidence/security-probe-after.json`
+  - `shipshape/shipshape-evidence/security-probe-after.md`
+- Reviewed source for CORS/CSP, secrets and env handling, rate limiting, and verbose error leakage.
+- Verified the fixes with the probe plus `pnpm --filter @ship/api type-check`, `pnpm --filter @ship/api test`, and `pnpm --filter @ship/web test`.
+
+Operational details for the probe are documented in `shipshape/SECURITY_PROBE.md`.
+
+### Security Probe Results
+
+| Run | Checks Passed | Checks Failed | Checks Skipped | Findings | Severity Breakdown |
+|---|---:|---:|---:|---:|---|
+| Before fixes | 9/14 | 4 | 1 | 14 | 2 Critical, 11 High, 1 Medium |
+| After fixes | 13/14 | 1 | 0 | 11 | 1 Critical, 9 High, 1 Medium |
+
+### Deliverable Metrics
+
+| Metric | Result |
+|---|---|
+| Security probe runnable | Yes: `pnpm security:probe -- --base-url http://127.0.0.1:3400` |
+| Auth/session vulnerabilities | No verified auth/session finding. Unauthenticated `/api/auth/me` returned 401, seeded admin login worked, session ID matched 64 hex characters, and regular member access to `/api/admin/workspaces` returned 403. |
+| WebSocket validation failures | Before: unsupported message type was silently accepted; malformed empty message crashed the API process. After: unsupported and malformed messages close with 1003, oversized payload closes with 1009, and `/health` remains available. |
+| Input sanitization failures | 1 Medium remains: document titles accept and store raw HTML event-handler payload text. |
+| High/Critical dependency vulnerabilities | 10 remain: `fast-xml-parser` (1 Critical, 3 High), `hono` (1 High), `@hono/node-server` (1 High), `express-rate-limit` (1 High), `path-to-regexp` (2 High), and `fast-uri` (2 High). |
+| CORS/CSP misconfiguration | Before: global CSP allowed `script-src 'unsafe-inline'`. After: `script-src` uses `'self'` plus a per-request nonce. CORS uses configured origin plus credentials, not wildcard credentials. |
+| Secrets exposure | No direct secret value exposure found in the inspected admin credentials path; client secret is masked in UI and logs only its length. Issuer URL/client ID and upstream validation errors are logged or surfaced to super-admins and should be tightened before production. |
+| Rate limiting absent | Not absent for major surfaces: general API, login, AI analysis, and WebSocket connection/message rate limits are present. The production dependency audit still flags `express-rate-limit`, so upgrade remains required. |
+| Verbose error leakage | Mostly generic API errors. Admin credentials validation can return issuer-discovery/upstream error text to a super-admin; classify as a hardening item rather than a public leak. |
+
+### Verified Fixes
+
+1. **CSP inline-script exposure closed.** Before evidence showed `script-src 'self' 'unsafe-inline'` and the probe emitted `Global CSP allows inline scripts`. The fix generates a nonce per request in `api/src/app.ts:111-124`, applies it to Helmet's `script-src`, and passes it into the admin credentials page in `api/src/routes/admin-credentials.ts:45-53`, `api/src/routes/admin-credentials.ts:280`, and `api/src/routes/admin-credentials.ts:459`. After evidence shows the CSP check passing with `script-src 'self' 'nonce-...'`.
+2. **Collaboration WebSocket malformed-message crash closed.** Before evidence showed unsupported message type 99 being accepted and an empty malformed message causing an uncaught `Unexpected end of array` crash. The fix wraps collaboration message decoding in try/catch, closes unsupported/malformed messages with 1003 in `api/src/collaboration/index.ts:306-351`, and adds WebSocket error handling around active connections in `api/src/collaboration/index.ts:726-758`. After evidence shows unsupported type 99 closes with `Unsupported collaboration message type`, malformed input closes with `Malformed collaboration message`, oversized input closes with 1009, and `/health` remains 200.
+
+These two fixes satisfy the Category 8 improvement target: at least two verified vulnerabilities fixed with before/after proof while preserving existing tests.
+
+### Test Suite Summary
+
+| Command | Result | Test Files | Tests | Runtime | Notes |
+|---|---|---:|---:|---:|---|
+| `pnpm --filter @ship/api type-check` | Pass | n/a | n/a | n/a | Confirms the CSP nonce typing and WebSocket changes compile. |
+| `pnpm --filter @ship/api test` | Pass | 29 passed | 465 passed | 73.43s | No tests flipped. Expected negative-path stderr remained from existing tests. |
+| `pnpm --filter @ship/web test` | Pass | 19 passed | 157 passed | 37.80s | No tests flipped. Existing React `act(...)` and Node ESM experimental warnings remain. |
+
+### Remaining Security Findings
+
+1. **Critical: `fast-xml-parser` production dependency advisory.** Audit reports an entity encoding bypass via regex injection in DOCTYPE entity names.
+2. **High: additional production dependency advisories.** Audit reports high-severity advisories in `fast-xml-parser`, `hono`, `@hono/node-server`, `express-rate-limit`, `path-to-regexp`, and `fast-uri`.
+3. **Medium: document title accepts raw HTML event-handler payload text.** React escaping mitigates current normal rendering, but raw storage increases future XSS risk in exports, notifications, logs, or alternate renderers.
+
+### Improvement Opportunities For Phase 2
+
+- Upgrade or override the vulnerable production dependency chain and rerun `pnpm security:probe` until the high/critical dependency count is 0.
+- Sanitize or reject HTML-like document titles at the API boundary while preserving expected plain-text titles.
+- Tighten admin credentials validation responses so upstream provider errors cannot accidentally expose sensitive endpoint or configuration detail.
+- Keep the probe in CI as a non-regression gate, with explicit allowance only for documented dependency advisories that are not reachable in deployment.
 
 ## Implementation Evidence Addendum
 

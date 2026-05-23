@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
+import crypto from 'crypto';
 import { csrfSync } from 'csrf-sync';
 import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth.js';
@@ -107,6 +108,11 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     });
   }
 
+  app.use((_req, res, next) => {
+    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    next();
+  });
+
   // Middleware - Security headers
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },  // Allow images to be loaded cross-origin
@@ -114,7 +120,7 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"], // Admin credentials page uses inline scripts
+        scriptSrc: ["'self'", (_req, res) => `'nonce-${(res as Response).locals.cspNonce}'`],
         styleSrc: ["'self'", "'unsafe-inline'"], // TipTap editor needs inline styles
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "wss:", "ws:"], // WebSocket connections
