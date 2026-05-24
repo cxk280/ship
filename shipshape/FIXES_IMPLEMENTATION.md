@@ -236,7 +236,7 @@ This slice addresses the strict self-grade in `CODEX_AUDIT_OF_CODEX_AUDIT.md`.
 
 ## Claude Final Audit & Remediation Slice (2026-05-24)
 
-An independent adversarial re-grade by Claude (see `shipshape/CLAUDE_FINAL_AUDIT.md`) found and fixed defects that the earlier passes missed. All fixes preserve the green unit suite (API 465 + web 157 = 622 tests) and were verified in a real browser locally and on Railway.
+An independent adversarial re-grade by Claude (see `CLAUDE_FINAL_AUDIT.md`) found and fixed defects that the earlier passes missed. All fixes preserve the green unit suite (API 465 + web 157 = 622 tests) and were verified in a real browser locally and on Railway.
 
 ### Category 7 — Accessibility (two real defects fixed)
 
