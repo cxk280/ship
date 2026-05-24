@@ -92,8 +92,9 @@ const apiLimiter = rateLimit({
 export function createApp(corsOrigin: string = 'http://localhost:5173'): express.Express {
   const app = express();
 
-  // Trust proxy headers (CloudFront) for secure cookies and correct protocol detection
-  if (process.env.NODE_ENV === 'production') {
+  // Trust proxy headers (CloudFront/Railway) for secure cookies, rate limiting,
+  // and correct protocol detection behind managed reverse proxies.
+  if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
     app.set('trust proxy', 1);
 
     // CloudFront with viewer_protocol_policy="redirect-to-https" always serves viewers over HTTPS.
