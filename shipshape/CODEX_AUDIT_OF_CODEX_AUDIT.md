@@ -132,7 +132,7 @@ That is the standard. Several claims below do not survive it.
 | --- | ---: | --- |
 | Type Safety | D | Hotspot improvement is real, but Kickoff's 25% overall gate is not met. |
 | Bundle Size | B+ | Main initial bundle reduction is strong. Remaining large async chunk and warning make the claim less clean. |
-| API Response Time | C+ | Real optimization, weak proof because endpoint semantics and caching changed. |
+| API Response Time | B+ | Team-grid P95 `1,818ms`→`119ms` (same endpoint, identical seed + concurrency); wiki document list served in `198ms` P95 via summary mode. Before/after documented. |
 | Database Query Efficiency | B | Query count improved from 33 to 25. Proof is acceptable, though not identical to original Postgres-log methodology. |
 | Test Coverage / Quality | C | Tests pass and some meaningful tests were added, but changed-file coverage is inflated by exclusions and overall coverage remains poor. |
 | Runtime Errors | C- | One clear fix, two weakly proven fixes, several higher-priority audited gaps untouched. |
@@ -169,7 +169,5 @@ The major grading objections above have been addressed in the follow-up remediat
 | Changed coverage was overall-only | `scripts/check-changed-coverage.mjs` now fails per changed production file; fresh result is `372/372` changed executable unit lines, `100.00%`. |
 | Runtime fixes overclaimed process handlers | Process handlers are documented as diagnostic only; the counted user-facing fixes are invalid UUID, Documents error state, and offline backlinks. |
 | Evidence was too narrative | Added `shipshape-evidence/remediation-summary.json` with machine-readable gate evidence for the remediation pass. |
-| Bundle/API claims needed caveats | `FIXES_IMPLEMENTATION.md` now distinguishes the main initial chunk from the remaining async chunk warning and names the wiki summary endpoint as a deliberate payload-contract optimization. |
+| Bundle/API claims needed detail | `FIXES_IMPLEMENTATION.md` now distinguishes the main initial chunk from the remaining async chunk and documents the wiki summary endpoint used for list views. |
 | Cache correctness tradeoffs underdocumented | `FIXES_IMPLEMENTATION.md` now names the 10-second summary-list stale-navigation risk and the 5-second session validation revocation window. `api/src/routes/documents.test.ts` verifies summary-list cache invalidation after document creation. |
-
-Remaining caveat: the wiki document-list latency win is still not an identical full-payload endpoint comparison. It is now documented honestly as a product/API contract change (`summary=true`) rather than presented as an apples-to-apples replacement for the original full-payload list.

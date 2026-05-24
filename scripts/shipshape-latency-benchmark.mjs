@@ -3,10 +3,12 @@ const baseUrl = process.env.SHIPSHAPE_BASE_URL || 'http://localhost:3000';
 const concurrency = Number(process.env.SHIPSHAPE_CONCURRENCY || 50);
 const durationMs = Number(process.env.SHIPSHAPE_DURATION_MS || 5000);
 
-const endpoints = [
-  '/api/documents?type=wiki&summary=true',
-  '/api/team/accountability-grid-v3',
-];
+const endpoints = (process.env.SHIPSHAPE_ENDPOINTS
+  ? process.env.SHIPSHAPE_ENDPOINTS.split(',').map(s => s.trim()).filter(Boolean)
+  : [
+      '/api/documents?type=wiki&summary=true',
+      '/api/team/accountability-grid-v3',
+    ]);
 
 function percentile(values, p) {
   if (values.length === 0) return 0;

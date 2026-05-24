@@ -52,5 +52,16 @@
     "typescript": "^5.7.2",
     "vitest": "^4.0.16",
     "ws": "^8.19.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-xml-parser": "^5.5.6",
+      "hono": "^4.12.4",
+      "@hono/node-server": "^1.19.10",
+      "express-rate-limit": "^8.2.2",
+      "fast-uri": "^3.1.2",
+      "express>path-to-regexp": "0.1.13",
+      "router>path-to-regexp": "^8.4.0"
+    }
   }
 }

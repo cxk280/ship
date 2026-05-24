@@ -36,7 +36,7 @@
     "csrf-sync": "^4.2.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "express-rate-limit": "^8.2.1",
+    "express-rate-limit": "^8.2.2",
     "express-session": "^1.18.2",
     "helmet": "^8.0.0",
     "lib0": "^0.2.99",

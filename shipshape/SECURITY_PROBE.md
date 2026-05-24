@@ -64,27 +64,26 @@ Current before/after evidence is stored in:
 
 Before the Category 8 fixes, the probe reported `14` findings: `2` Critical, `11` High, and `1` Medium. The verified issues included global `script-src 'unsafe-inline'`, unsupported WebSocket messages being silently accepted, and malformed collaboration messages crashing the API process.
 
-After the fixes, the current enhanced probe reported `12` findings: `1` Critical, `9` High, and `2` Medium. The closed findings are:
+After the Category 8 fixes **and** the dependency-advisory remediation (2026-05-24), the probe reports `2` findings, both `Medium`, with `14/16` checks passing and **`0` Critical/High/dependency findings**. The closed findings are:
 
 - Global CSP no longer allows inline scripts. The app now emits a per-request nonce in `script-src`, and the admin credentials page applies that nonce to its inline script.
 - Unsupported collaboration message types now close with WebSocket code `1003`.
 - Malformed collaboration messages now close with WebSocket code `1003` and leave `/health` available.
 - Oversized collaboration payloads now close with WebSocket code `1009` without an uncaught process exception.
+- **All high/critical dependency advisories are resolved** via pinned `pnpm.overrides` in the root `package.json`: `fast-xml-parser ^5.5.6` (closes the critical entity-encoding bypass + DoS advisories under `@aws-sdk`), `hono ^4.12.4`, `@hono/node-server ^1.19.10`, `express-rate-limit ^8.2.2` (also bumped as a direct dep), `fast-uri ^3.1.2`, and path-scoped `express>path-to-regexp 0.1.13` / `router>path-to-regexp ^8.4.0`. `pnpm audit --prod` now reports `0` high/critical (6 moderate + 1 low remain on the editor/websocket/express paths and are below the probe's gating threshold). Build, type-check, and the full unit suite still pass after the upgrade.
 
 Remaining open findings:
 
 | Severity | Category | Finding |
 |---|---|---|
-| Critical | Dependencies | `fast-xml-parser` entity encoding bypass advisory. |
-| High | Dependencies | Nine additional production dependency advisories across `fast-xml-parser`, `hono`, `@hono/node-server`, `express-rate-limit`, `path-to-regexp`, and `fast-uri`. |
-| Medium | Input sanitization | Document titles accept and store raw HTML event-handler payload text. React escaping reduces immediate rendering risk, but downstream renderers, notifications, exports, and logs could reintroduce XSS exposure. |
-| Medium | Input sanitization | Document content accepts and stores raw HTML event-handler payload text. TipTap text-node rendering reduces immediate rendering risk, but exported/previews/search snippets/future renderers could reintroduce XSS exposure. |
+| Medium | Input sanitization | Document titles store raw HTML event-handler payload text. **Verified mitigated at output:** all render paths escape — React text rendering, TipTap text nodes, and the two manual `innerHTML` widgets (`CommentDisplay.tsx`, `AIScoringDisplay.tsx`) route every user value through an `escapeHtml()` helper. Input is intentionally stored verbatim to preserve fidelity (titles legitimately contain `<`, `>`); the correct control is output encoding, which is present and audited. |
+| Medium | Input sanitization | Document content stores raw HTML event-handler payload text in TipTap text nodes, which render as escaped text (not HTML). Same verified output-encoding mitigation as above; sanitizing stored text would corrupt legitimate content (code blocks, math, comparisons) and is the wrong layer. |
 
 ## Manual Review Notes
 
 - **CORS/CSP:** CORS is configured with a single supplied origin and credentials, not wildcard credentials. Before the fix CSP allowed inline scripts; after the fix `script-src` uses `'self'` plus a nonce. Inline styles remain allowed for editor compatibility.
 - **Secrets handling:** CAIA secrets are stored through Secrets Manager/SSM paths. The inspected admin credentials flow masks the client secret in the UI and logs only length, but it does log issuer URL and client ID. Error responses from credential validation can include upstream error text and should be tightened before production.
-- **Rate limiting:** General API rate limiting, stricter login rate limiting, AI-analysis rate limiting, and WebSocket connection/message limits are present. The production dependency audit still flags `express-rate-limit`, so the package should be upgraded even though rate limiting exists.
+- **Rate limiting:** General API rate limiting, stricter login rate limiting, AI-analysis rate limiting, and WebSocket connection/message limits are present. `express-rate-limit` has been upgraded to `^8.2.2`, which closes the IPv4-mapped-IPv6 per-client bypass advisory (`GHSA-46wh-pxpv-q5gq`).
 - **Verbose error leakage:** Most API paths return generic errors. The admin credentials save/test flow can surface validation and issuer-discovery error strings to a super-admin, which is useful operationally but should be reviewed for upstream secret leakage.
 
 ## Interpreting Results

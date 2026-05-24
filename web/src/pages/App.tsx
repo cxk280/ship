@@ -642,7 +642,7 @@ function DocumentsTree({ documents, activeId, onSelect }: { documents: WikiDocum
           <GlobeIcon className="h-3 w-3" />
           Workspace
         </div>
-        <ul aria-label="Workspace documents" aria-live="polite" className="space-y-0.5 px-2">
+        <ul role="tree" aria-label="Workspace documents" aria-live="polite" className="space-y-0.5 px-2">
           {workspaceToShow.length > 0 ? (
             workspaceToShow.map((doc) => (
               <DocumentTreeItem
@@ -675,7 +675,7 @@ function DocumentsTree({ documents, activeId, onSelect }: { documents: WikiDocum
             <LockIcon className="h-3 w-3" />
             Private
           </div>
-          <ul aria-label="Private documents" aria-live="polite" className="space-y-0.5 px-2">
+          <ul role="tree" aria-label="Private documents" aria-live="polite" className="space-y-0.5 px-2">
             {privateToShow.map((doc) => (
               <DocumentTreeItem
                 key={doc.id}
@@ -825,6 +825,9 @@ function DocumentTreeItem({
 
   return (
     <li
+      role="treeitem"
+      aria-expanded={hasChildren ? isOpen : undefined}
+      aria-selected={isActive}
       data-tree-item
       data-testid="doc-item"
     >
@@ -908,7 +911,7 @@ function DocumentTreeItem({
 
       {/* Children (collapsible) */}
       {hasChildren && isOpen && (
-        <ul className="space-y-0.5">
+        <ul role="group" className="space-y-0.5">
           {document.children.map((child) => (
             <DocumentTreeItem
               key={child.id}

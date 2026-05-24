@@ -123,10 +123,10 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", (_req, res) => `'nonce-${(res as Response).locals.cspNonce}'`],
-        styleSrc: ["'self'", "'unsafe-inline'"], // TipTap editor needs inline styles
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], // TipTap inline styles + Google Fonts stylesheet
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "wss:", "ws:"], // WebSocket connections
-        fontSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"], // Google Fonts (Inter) loaded in index.html
         objectSrc: ["'none'"],
         frameSrc: ["'none'"],
         baseUri: ["'self'"],
