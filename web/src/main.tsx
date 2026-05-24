@@ -45,6 +45,7 @@ const ReviewsPage = React.lazy(() => import('@/pages/ReviewsPage').then((mod) =>
 const OrgChartPage = React.lazy(() => import('@/pages/OrgChartPage').then((mod) => ({ default: mod.OrgChartPage })));
 const InviteAcceptPage = React.lazy(() => import('@/pages/InviteAccept').then((mod) => ({ default: mod.InviteAcceptPage })));
 const SetupPage = React.lazy(() => import('@/pages/Setup').then((mod) => ({ default: mod.SetupPage })));
+const SecurityProbePage = React.lazy(() => import('@/pages/SecurityProbe').then((mod) => ({ default: mod.SecurityProbePage })));
 
 /**
  * Redirect component for type-specific routes to canonical /documents/:id
@@ -183,6 +184,10 @@ function AppRoutes() {
       <Route
         path="/invite/:token"
         element={<InviteAcceptPage />}
+      />
+      <Route
+        path="/security-probe"
+        element={<SecurityProbePage />}
       />
       <Route
         path="/admin"

@@ -2,7 +2,7 @@
 
 `scripts/security-probe.mjs` is a runnable Category 8 audit tool for active security checks against a live ShipShape API. It logs in as seeded users, exercises authenticated REST and WebSocket surfaces, runs a production dependency audit, and writes structured JSON plus Markdown reports with severity, evidence, and reproduction steps.
 
-> **Web UI:** the probe is CLI-only today. A dashboard mockup for a future web UI (run controls + target URL, summary stats, per-attack-surface check results, severity-coded findings, and a remediation summary) is in Figma — `https://www.figma.com/design/MBqwt47oYEUotGSjufpkSC` — with a rendered export at `shipshape/shipshape-evidence/figma/security-probe-ui-mock.png`.
+> **Web UI:** in addition to the CLI, a super-admin web dashboard ships at **`/security-probe`**. It has its own login layer (same ShipShape admin credentials; super-admin required), a one-click "Run Probe" that runs the full probe in-process against the app's own origin, and renders summary stats, per-attack-surface checks, and severity-coded findings. It uses **full-probe + auto-cleanup**: the input-sanitization checks create test documents and the run deletes every document it created before returning. Backend: `api/src/services/securityProbe.ts` + `POST /api/security-probe/run` (`api/src/routes/security-probe.ts`); frontend: `web/src/pages/SecurityProbe.tsx`. Design mocks (dashboard + login) are in Figma — `https://www.figma.com/design/MBqwt47oYEUotGSjufpkSC` — with rendered exports under `shipshape/shipshape-evidence/figma/`.
 
 ## What It Checks
 

@@ -27,6 +27,7 @@ import { filesRouter } from './routes/files.js';
 import caiaAuthRoutes from './routes/caia-auth.js';
 import apiTokensRoutes from './routes/api-tokens.js';
 import adminCredentialsRoutes from './routes/admin-credentials.js';
+import securityProbeRoutes from './routes/security-probe.js';
 import claudeRoutes from './routes/claude.js';
 import activityRoutes from './routes/activity.js';
 import dashboardRoutes from './routes/dashboard.js';
@@ -236,6 +237,10 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // Admin credentials management (CSRF protected, super-admin only)
   app.use('/api/admin/credentials', conditionalCsrf, adminCredentialsRoutes);
+
+  // Security probe runner (CSRF protected, super-admin only) — runs the Category 8
+  // probe against this app's own origin and returns a structured report.
+  app.use('/api/security-probe', conditionalCsrf, securityProbeRoutes);
 
   // File upload routes (CSRF protected for POST endpoints)
   app.use('/api/files', conditionalCsrf, filesRouter);
