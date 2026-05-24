@@ -579,7 +579,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
     const { title: rawTitle, document_type, parent_id, program_id, sprint_id, properties, content: rawContent, belongs_to } = parsed.data;
     // Strip HTML tags from the title and plain-text content nodes (defense-in-depth
     // on top of React/TipTap output encoding; code blocks are preserved).
-    const title = sanitizeTitle(rawTitle) as string;
+    const title = sanitizeTitle(rawTitle);
     const content = rawContent ? sanitizeTipTapContent(rawContent) : rawContent;
     let { visibility } = parsed.data;
 

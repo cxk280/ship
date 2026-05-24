@@ -52,6 +52,17 @@ export interface ProbeReport {
   cleanup: { createdDocumentIds: string[]; deleted: number; failed: number };
 }
 
+interface AuditVuln {
+  severity?: string;
+  name?: string;
+  module_name?: string;
+  packageName?: string;
+  title?: string;
+  url?: string;
+  range?: string;
+  vulnerable_versions?: string;
+}
+
 export interface ProbeOptions {
   baseUrl: string;
   adminEmail?: string;
@@ -79,10 +90,10 @@ class CookieJar {
   }
 }
 
-interface RequestResult {
+interface RequestResult<T = unknown> {
   status: number;
   headers: Headers;
-  body: unknown;
+  body: T;
   text: string;
 }
 
@@ -142,20 +153,20 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     return url.toString();
   };
 
-  async function request(path: string, options: RequestInit = {}, jar = new CookieJar()): Promise<RequestResult> {
+  async function request<T = unknown>(path: string, options: RequestInit = {}, jar = new CookieJar()): Promise<RequestResult<T>> {
     const headers = new Headers(options.headers || {});
     if (jar.header()) headers.set('cookie', jar.header());
     const response = await fetch(`${baseUrl}${path}`, { ...options, headers, redirect: 'manual' });
     jar.store(getSetCookie(response));
     const text = await response.text();
-    let body: unknown = null;
-    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-    return { status: response.status, headers: response.headers, body, text };
+    let parsed: unknown = null;
+    try { parsed = text ? JSON.parse(text) : null; } catch { parsed = text; }
+    return { status: response.status, headers: response.headers, body: parsed as T, text };
   }
 
   async function getCsrf(jar: CookieJar): Promise<string> {
-    const result = await request('/api/csrf-token', {}, jar);
-    const token = (result.body as { token?: string } | null)?.token;
+    const result = await request<{ token?: string }>('/api/csrf-token', {}, jar);
+    const token = result.body?.token;
     if (result.status !== 200 || !token) throw new Error(`Unable to fetch CSRF token: HTTP ${result.status}`);
     return token;
   }
@@ -182,19 +193,21 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     let member = await login(memberEmail, memberPassword);
     if (member.result.status === 200) return member;
     try {
-      const me = await request('/api/auth/me', {}, admin.jar);
-      let wsId = (me.body as { currentWorkspace?: { id?: string } } | null)?.currentWorkspace?.id;
+      // Admin/auth routes wrap responses in a { success, data } envelope; documents
+      // routes return raw objects. Read both shapes defensively.
+      const me = await request<{ data?: { currentWorkspace?: { id?: string } }; currentWorkspace?: { id?: string } }>('/api/auth/me', {}, admin.jar);
+      let wsId = me.body?.data?.currentWorkspace?.id ?? me.body?.currentWorkspace?.id;
       if (!wsId) {
-        const ws = await request('/api/admin/workspaces', {}, admin.jar);
-        wsId = (ws.body as { workspaces?: Array<{ id?: string }> } | null)?.workspaces?.[0]?.id;
+        const ws = await request<{ data?: { workspaces?: Array<{ id?: string }> }; workspaces?: Array<{ id?: string }> }>('/api/admin/workspaces', {}, admin.jar);
+        wsId = ws.body?.data?.workspaces?.[0]?.id ?? ws.body?.workspaces?.[0]?.id;
       }
       if (!wsId) return member;
       const csrf = await getCsrf(admin.jar);
-      const invite = await request(`/api/admin/workspaces/${wsId}/invites`, {
+      const invite = await request<{ data?: { invite?: { token?: string } }; invite?: { token?: string } }>(`/api/admin/workspaces/${wsId}/invites`, {
         method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
         body: JSON.stringify({ email: memberEmail, role: 'member' }),
       }, admin.jar);
-      const token = (invite.body as { invite?: { token?: string } } | null)?.invite?.token;
+      const token = invite.body?.data?.invite?.token ?? invite.body?.invite?.token;
       if (!token) return member;
       const acceptJar = new CookieJar();
       const acceptCsrf = await getCsrf(acceptJar);
@@ -287,10 +300,10 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     const headers = { 'content-type': 'application/json', 'x-csrf-token': csrf };
 
     const xssTitle = `<img src=x onerror=alert('shipshape')>`;
-    const xssCreate = await request('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: xssTitle, document_type: 'wiki' }) }, admin.jar);
-    const xssId = (xssCreate.body as { id?: string } | null)?.id;
+    const xssCreate = await request<{ id?: string; title?: string }>('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: xssTitle, document_type: 'wiki' }) }, admin.jar);
+    const xssId = xssCreate.body?.id;
     if (xssId) createdDocIds.push(xssId);
-    const xssTitleStored = (xssCreate.body as { title?: string } | null)?.title === xssTitle;
+    const xssTitleStored = xssCreate.body?.title === xssTitle;
     addCheck('input-sanitization', 'Stored XSS title payload rejected or sanitized', xssCreate.status >= 400 || !xssTitleStored ? 'pass' : 'fail', {
       status: xssCreate.status, acceptedRawPayload: xssTitleStored, id: xssId,
     });
@@ -306,8 +319,8 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     if (xssId) {
       const contentPayload = `<svg onload=alert('shipshape-content')>`;
       const contentProbe = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: contentPayload }] }] };
-      const contentUpdate = await request(`/api/documents/${xssId}/content`, { method: 'PATCH', headers, body: JSON.stringify({ content: contentProbe }) }, admin.jar);
-      const acceptedRaw = containsStringDeep((contentUpdate.body as { content?: unknown } | null)?.content, contentPayload);
+      const contentUpdate = await request<{ content?: unknown }>(`/api/documents/${xssId}/content`, { method: 'PATCH', headers, body: JSON.stringify({ content: contentProbe }) }, admin.jar);
+      const acceptedRaw = containsStringDeep(contentUpdate.body?.content, contentPayload);
       addCheck('input-sanitization', 'Stored XSS content payload rejected or sanitized', contentUpdate.status >= 400 || !acceptedRaw ? 'pass' : 'fail', {
         status: contentUpdate.status, acceptedRawPayload: acceptedRaw, id: xssId,
       });
@@ -338,8 +351,8 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     }
 
     const longTitle = 'A'.repeat(5000);
-    const longCreate = await request('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: longTitle, document_type: 'wiki' }) }, admin.jar);
-    const longId = (longCreate.body as { id?: string } | null)?.id;
+    const longCreate = await request<{ id?: string }>('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: longTitle, document_type: 'wiki' }) }, admin.jar);
+    const longId = longCreate.body?.id;
     if (longId) createdDocIds.push(longId);
     addCheck('input-sanitization', 'Excessively long document title rejected', longCreate.status === 400 ? 'pass' : 'fail', { status: longCreate.status });
     if (longCreate.status !== 400) {
@@ -351,8 +364,8 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     }
 
     const sqlTitle = `' OR 1=1; --`;
-    const sqlCreate = await request('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: sqlTitle, document_type: 'wiki' }) }, admin.jar);
-    const sqlId = (sqlCreate.body as { id?: string } | null)?.id;
+    const sqlCreate = await request<{ id?: string }>('/api/documents', { method: 'POST', headers, body: JSON.stringify({ title: sqlTitle, document_type: 'wiki' }) }, admin.jar);
+    const sqlId = sqlCreate.body?.id;
     if (sqlId) createdDocIds.push(sqlId);
     addCheck('input-sanitization', 'SQL injection title payload does not cause server error', sqlCreate.status < 500 ? 'pass' : 'fail', { status: sqlCreate.status });
     if (sqlCreate.status >= 500) {
@@ -415,7 +428,7 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
     await waitForWsOpen(malformed); await sleep(250);
     malformed.send(Buffer.alloc(0));
     const malformedResult = await waitForWsCloseOrTimeout(malformed, 1000);
-    const healthAfter = await request('/health').catch((e: Error) => ({ status: 0, headers: new Headers(), body: { error: e.message }, text: '' } as RequestResult));
+    const healthAfter = await request('/health').catch(() => ({ status: 0, headers: new Headers(), body: null, text: '' }));
     addCheck('websocket-validation', 'Malformed empty collaboration message rejected without process crash', malformedResult.closed && healthAfter.status === 200 ? 'pass' : 'fail', {
       malformedResult, healthStatus: healthAfter.status,
     });
@@ -452,22 +465,22 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
       tool = 'pnpm audit --json --prod';
       audit = spawnSync('pnpm', ['audit', '--json', '--prod'], { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, timeout: 25000 });
     }
-    let parsed: { vulnerabilities?: Record<string, unknown>; advisories?: Record<string, unknown> } | null = null;
+    let parsed: { vulnerabilities?: Record<string, AuditVuln>; advisories?: Record<string, AuditVuln> } | null = null;
     try { parsed = JSON.parse(audit.stdout || '{}'); } catch { parsed = null; }
-    const source = parsed?.vulnerabilities ? Object.values(parsed.vulnerabilities) : Object.values(parsed?.advisories || {});
-    const vulns: Array<{ name: string; severity: string; title?: string; url?: string; range?: string; featureImpact: string }> = [];
-    for (const v of source as Array<Record<string, unknown>>) {
-      const severity = (v.severity as string) || '';
+    const source: AuditVuln[] = parsed?.vulnerabilities ? Object.values(parsed.vulnerabilities) : Object.values(parsed?.advisories || {});
+    const vulns: Array<{ name: string; severity: Severity; title?: string; url?: string; range?: string; featureImpact: string }> = [];
+    for (const v of source) {
+      const severity = v.severity || '';
       if (severity === 'high' || severity === 'critical') {
-        const name = (v.name || v.module_name || v.packageName) as string;
-        vulns.push({ name, severity, title: v.title as string, url: v.url as string, range: (v.range || v.vulnerable_versions) as string, featureImpact: mapDependencyToFeature(name) });
+        const name = v.name || v.module_name || v.packageName || 'unknown package';
+        vulns.push({ name, severity, title: v.title, url: v.url, range: v.range || v.vulnerable_versions, featureImpact: mapDependencyToFeature(name) });
       }
     }
     addCheck('dependencies', 'Dependency vulnerability audit parsed', parsed ? 'pass' : 'fail', {
       tool, exitStatus: audit.status, highCriticalCount: vulns.length, stderr: (audit.stderr || '').slice(0, 1000),
     });
     for (const v of vulns) {
-      addFinding({ category: 'dependencies', severity: v.severity as Severity, title: `High/Critical dependency vulnerability: ${v.name || 'unknown package'}`,
+      addFinding({ category: 'dependencies', severity: v.severity, title: `High/Critical dependency vulnerability: ${v.name}`,
         description: v.title || 'Dependency audit reported a high or critical vulnerability.', reproductionSteps: [tool], evidence: v });
     }
   }

@@ -19,8 +19,7 @@ export function stripHtmlTags(value: string): string {
 }
 
 /** Sanitize a short plain-text label (document title). */
-export function sanitizeTitle(title: unknown): unknown {
-  if (typeof title !== 'string') return title;
+export function sanitizeTitle(title: string): string {
   return stripHtmlTags(title);
 }
 
@@ -31,13 +30,9 @@ interface TipTapNodeLike {
   [key: string]: unknown;
 }
 
-/**
- * Recursively strip HTML tags from text nodes in a TipTap document, leaving the
- * structure intact and preserving code-block contents.
- */
-export function sanitizeTipTapContent<T>(content: T, inCodeBlock = false): T {
+function sanitizeNode(content: unknown, inCodeBlock: boolean): unknown {
   if (Array.isArray(content)) {
-    return content.map((child) => sanitizeTipTapContent(child, inCodeBlock)) as unknown as T;
+    return content.map((child) => sanitizeNode(child, inCodeBlock));
   }
   if (content && typeof content === 'object') {
     const node = content as TipTapNodeLike;
@@ -47,9 +42,17 @@ export function sanitizeTipTapContent<T>(content: T, inCodeBlock = false): T {
       next.text = stripHtmlTags(node.text);
     }
     if (node.content !== undefined) {
-      next.content = sanitizeTipTapContent(node.content, isCode);
+      next.content = sanitizeNode(node.content, isCode);
     }
-    return next as unknown as T;
+    return next;
   }
   return content;
+}
+
+/**
+ * Recursively strip HTML tags from text nodes in a TipTap document, leaving the
+ * structure intact and preserving code-block contents.
+ */
+export function sanitizeTipTapContent<T>(content: T): T {
+  return sanitizeNode(content, false) as T;
 }
