@@ -335,7 +335,7 @@ export function ProjectsPage() {
       <p className="text-muted">No projects yet</p>
       <button
         onClick={handleCreateProject}
-        className="mt-2 text-sm text-accent hover:underline"
+        className="mt-2 text-sm font-medium text-foreground underline hover:no-underline"
       >
         Create your first project
       </button>

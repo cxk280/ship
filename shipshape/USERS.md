@@ -10,7 +10,7 @@ Purpose: this file defines realistic user personas for future user-acceptance te
 - Human personas must not use direct database access, API clients, browser devtools shortcuts, local storage edits, test fixtures, scripts, or code changes to bypass the browser experience.
 - Human personas do not make fixes. They only produce a list of complaints, confusion points, bugs, accessibility blockers, performance issues, missing affordances, and workflow failures.
 - Fixes are made only in the main implementation thread.
-- Every fix made in response to persona UAT must be documented in `./shipshape/AGENT_PERSONAS_UAT_FIXES.md`.
+- Every fix made in response to persona UAT must be documented in the implementation log (`shipshape/FIXES_IMPLEMENTATION.md`).
 - After fixes are made, the same persona must be re-run against the same scenario until that persona has no remaining complaints for that scenario.
 - Persona runs should preserve real-world friction. Do not guide the persona around known bugs, skip hard steps, pre-create hidden state, or tell the persona which UI element to click unless the product itself would make that clear.
 - Each persona complaint should include enough detail to reproduce it: persona name, scenario, browser/viewport, exact page or flow, observed result, expected result, severity, and whether it blocks task completion.

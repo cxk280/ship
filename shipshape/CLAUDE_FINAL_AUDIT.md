@@ -117,9 +117,11 @@ Security-probe detail (matches committed evidence): auth/session 4/4 pass (login
 
 ---
 
-## Deployment hardening
+## Deployment hardening (Railway now runs in production mode)
 
-`RAILWAY_DEPLOYMENT.md` recorded that Railway ran `NODE_ENV=development` to bypass the AWS SSM bootstrap. That note is now obsolete: `api/src/index.ts:24-26` gates SSM loading on `!process.env.RAILWAY_ENVIRONMENT`, so SSM is already skipped on Railway regardless of `NODE_ENV`. For the final deploy the service is switched to **`NODE_ENV=production`** (with `SESSION_SECRET` explicitly set), which enables secure cookies (`secure: true`, `sameSite: strict` over Railway HTTPS with `trust proxy` on), the stricter 100-req rate limit, and non-verbose error responses — the correct posture for a "production government web application." Login was re-verified in the browser after the switch.
+Railway previously ran `NODE_ENV=development` to dodge the AWS SSM secret bootstrap. For the final deploy the service is switched to **`NODE_ENV=production`** with `SESSION_SECRET` set and `LOAD_SSM=false`, which enables secure cookies (`secure: true`, `sameSite: strict` over Railway HTTPS with `trust proxy` on), the stricter 100-req rate limit, and non-verbose errors — the correct posture for a "production government web application."
+
+The first production switch crash-looped: the Docker start command runs `migrate.js && index.js`, and `migrate.ts` called `loadProductionSecrets()` unconditionally, so the migration step tried to read AWS SSM (no credentials on Railway) and exited before the server started — `LOAD_SSM=false` only gated `index.ts`. Fix (committed in `f412e1b`): the `LOAD_SSM`/`RAILWAY_ENVIRONMENT` bypass now lives **inside** `loadProductionSecrets` (`api/src/config/ssm.ts`), so every startup entrypoint — index, migrate, and seed — skips SSM and uses the platform-injected env vars. After the fix the deploy is healthy (HTTP 200), and login + the font-CSP fix were re-verified in the browser on the live site.
 
 ---
 

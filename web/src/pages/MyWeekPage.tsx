@@ -336,13 +336,15 @@ export function MyWeekPage() {
               const rowClass = cn(
                 'flex items-center gap-3 rounded-lg border px-4 py-2.5',
                 isToday ? 'border-accent/30 bg-accent/5' : 'border-border bg-surface',
-                isFuture && 'opacity-40',
+                // Future rows are de-emphasized via muted text + the "Upcoming" label rather than
+                // opacity dimming, which would drop text below the WCAG AA contrast minimum.
+                isFuture && 'border-dashed',
                 !isFuture && 'hover:border-accent/50 transition-colors'
               );
 
               const dateLabel = (
                 <div className="w-20 flex-shrink-0">
-                  <span className={cn('text-xs font-medium', isToday ? 'text-accent' : 'text-muted')}>
+                  <span className={cn('text-xs font-medium', isToday ? 'text-foreground' : 'text-muted')}>
                     {slot.day.slice(0, 3)}
                   </span>
                   <span className="text-xs text-muted ml-1">

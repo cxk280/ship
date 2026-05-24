@@ -79,6 +79,21 @@ Remaining open findings:
 | Medium | Input sanitization | Document titles store raw HTML event-handler payload text. **Verified mitigated at output:** all render paths escape — React text rendering, TipTap text nodes, and the two manual `innerHTML` widgets (`CommentDisplay.tsx`, `AIScoringDisplay.tsx`) route every user value through an `escapeHtml()` helper. Input is intentionally stored verbatim to preserve fidelity (titles legitimately contain `<`, `>`); the correct control is output encoding, which is present and audited. |
 | Medium | Input sanitization | Document content stores raw HTML event-handler payload text in TipTap text nodes, which render as escaped text (not HTML). Same verified output-encoding mitigation as above; sanitizing stored text would corrupt legitimate content (code blocks, math, comparisons) and is the wrong layer. |
 
+## Remediation Summary
+
+How each class of finding was handled:
+
+| Finding | Status | How it was remediated |
+|---|---|---|
+| CSP allowed inline scripts (`script-src 'unsafe-inline'`) | **Fixed** | `api/src/app.ts` emits a per-request nonce; `script-src` is now `'self'` + nonce. The one inline-script page (`admin-credentials.ts`) threads the nonce through. Probe check now passes. |
+| Malformed/unsupported/oversized WebSocket messages | **Fixed** | `api/src/collaboration/index.ts` wraps decode in try/catch, closes unsupported types with `1003`, malformed with `1003` (process stays up), oversized with `1009`. All 4 WebSocket probe checks pass. |
+| CSP blocked the app's own Google Fonts (deployed app) | **Fixed** | `api/src/app.ts` adds `fonts.googleapis.com` to `style-src` and `fonts.gstatic.com` to `font-src`. Verified on the live Railway app (console error gone). |
+| 1 Critical + 9 High dependency advisories | **Fixed** | Pinned `pnpm.overrides` in root `package.json`: `fast-xml-parser ^5.5.6`, `hono ^4.12.4`, `@hono/node-server ^1.19.10`, `express-rate-limit ^8.2.2` (also bumped direct), `fast-uri ^3.1.2`, path-scoped `express>path-to-regexp 0.1.13` / `router>path-to-regexp ^8.4.0`. `pnpm audit --prod` → 0 high/critical. Build, type-check, and 622 unit tests still pass. |
+| 2 Medium stored-XSS (title/content stored raw) | **Mitigated, not code-changed** | Deliberately **not** remediated by input sanitization — that would corrupt legitimate content (`<`, `>`, code). Instead verified the correct control (output encoding) is present at every sink: React text, TipTap text nodes, and the two manual `innerHTML` widgets (`CommentDisplay.tsx`, `AIScoringDisplay.tsx`) all escape via `escapeHtml()`. The probe still reports these 2 as "fail" because it checks input storage, not output exploitability. |
+| 6 Moderate + 1 Low dependency advisories | **Not addressed** | `markdown-it`, `ajv`, `yaml`, `ws`, `uuid`, `qs` — all transitive on the editor/websocket/express paths and below the probe's high/critical gate. Overriding them carries higher regression risk (editor markdown, query parsing, websocket), so they are tracked for a follow-up upgrade as upstreams patch. |
+
+**Not fully closed:** the 2 medium stored-XSS findings remain "fail" in the probe (mitigated at output, not at input — see rationale above), and 6 moderate + 1 low dependency advisories are intentionally deferred. Everything Critical/High is remediated.
+
 ## Manual Review Notes
 
 - **CORS/CSP:** CORS is configured with a single supplied origin and credentials, not wildcard credentials. Before the fix CSP allowed inline scripts; after the fix `script-src` uses `'self'` plus a nonce. Inline styles remain allowed for editor compatibility.

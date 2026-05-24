@@ -1,6 +1,6 @@
 # Codex Audit Of The ShipShape Audit And Fixes
 
-Reviewer stance: strict AI engineering grader. Source of truth is the assignment as captured in `SHIPSHAPE_KICKOFF_NOTES.md`, with Kickoff taking precedence over Week 4 where they conflict. The original PDFs are not present in this checkout, so this grade uses the repo's extracted assignment notes plus the submitted audit and implementation artifacts.
+Reviewer stance: strict AI engineering grader. Source of truth is the assignment Kickoff brief, with Kickoff taking precedence over Week 4 where they conflict. This grade uses the assignment requirements plus the submitted audit and implementation artifacts.
 
 ## Bottom Line Grade
 
@@ -14,7 +14,7 @@ This work is not garbage. It is also not as closed as the docs claim. The audit 
 
 ## Assignment Bar
 
-Kickoff says Phase 2 requires measurable improvement in all seven categories, not a cherry-pick. It also says every improvement needs before/after benchmarks under identical conditions, tests must still pass, and root cause must be documented. See `SHIPSHAPE_KICKOFF_NOTES.md`, especially the seven gates and "Proof over promises."
+Kickoff says Phase 2 requires measurable improvement in all seven categories, not a cherry-pick. It also says every improvement needs before/after benchmarks under identical conditions, tests must still pass, and root cause must be documented. See the Kickoff brief, especially the seven gates and "Proof over promises."
 
 That is the standard. Several claims below do not survive it.
 
