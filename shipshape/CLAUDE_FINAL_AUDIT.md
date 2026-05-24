@@ -123,6 +123,8 @@ Railway previously ran `NODE_ENV=development` to dodge the AWS SSM secret bootst
 
 The first production switch crash-looped: the Docker start command runs `migrate.js && index.js`, and `migrate.ts` called `loadProductionSecrets()` unconditionally, so the migration step tried to read AWS SSM (no credentials on Railway) and exited before the server started — `LOAD_SSM=false` only gated `index.ts`. Fix (committed in `f412e1b`): the `LOAD_SSM`/`RAILWAY_ENVIRONMENT` bypass now lives **inside** `loadProductionSecrets` (`api/src/config/ssm.ts`), so every startup entrypoint — index, migrate, and seed — skips SSM and uses the platform-injected env vars. After the fix the deploy is healthy (HTTP 200), and login + the font-CSP fix were re-verified in the browser on the live site.
 
+**Deployed application:** `https://shipshape-app-production-7ed8.up.railway.app` (demo login `dev@ship.local` / `admin123`).
+
 ---
 
 ## Files changed by this review
