@@ -40,6 +40,14 @@ export async function loadProductionSecrets(): Promise<void> {
     return; // Use .env files for local dev
   }
 
+  // Skip the AWS SSM bootstrap on platforms that inject secrets directly as env vars
+  // (e.g. Railway). Gating here protects every startup entrypoint — index, migrate, and
+  // seed — not just the server, so production mode does not crash without AWS credentials.
+  if (process.env.LOAD_SSM === 'false' || process.env.RAILWAY_ENVIRONMENT) {
+    console.log('Skipping SSM secret load (LOAD_SSM=false or RAILWAY_ENVIRONMENT set); using env vars.');
+    return;
+  }
+
   const environment = process.env.ENVIRONMENT || 'prod';
   const basePath = `/ship/${environment}`;
 
