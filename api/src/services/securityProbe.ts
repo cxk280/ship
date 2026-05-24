@@ -174,6 +174,39 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
   type AdminSession = { jar: CookieJar; csrf: string; result: RequestResult; sessionId?: string };
   const createdDocIds: string[] = [];
 
+  // Ensure a non-super-admin member session exists for the privilege-escalation check.
+  // If the configured member can't log in (e.g. a fresh deployment that was only
+  // `setup`-initialized and never seeded), self-provision a least-privilege member via
+  // the super-admin invite + accept flow, then retry. Idempotent across runs.
+  async function ensureMember(admin: AdminSession) {
+    let member = await login(memberEmail, memberPassword);
+    if (member.result.status === 200) return member;
+    try {
+      const me = await request('/api/auth/me', {}, admin.jar);
+      let wsId = (me.body as { currentWorkspace?: { id?: string } } | null)?.currentWorkspace?.id;
+      if (!wsId) {
+        const ws = await request('/api/admin/workspaces', {}, admin.jar);
+        wsId = (ws.body as { workspaces?: Array<{ id?: string }> } | null)?.workspaces?.[0]?.id;
+      }
+      if (!wsId) return member;
+      const csrf = await getCsrf(admin.jar);
+      const invite = await request(`/api/admin/workspaces/${wsId}/invites`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
+        body: JSON.stringify({ email: memberEmail, role: 'member' }),
+      }, admin.jar);
+      const token = (invite.body as { invite?: { token?: string } } | null)?.invite?.token;
+      if (!token) return member;
+      const acceptJar = new CookieJar();
+      const acceptCsrf = await getCsrf(acceptJar);
+      await request(`/api/invites/${token}/accept`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': acceptCsrf },
+        body: JSON.stringify({ password: memberPassword, name: 'ShipShape Probe Member' }),
+      }, acceptJar);
+      member = await login(memberEmail, memberPassword);
+    } catch { /* fall through with the failed login */ }
+    return member;
+  }
+
   async function runHeaderChecks(): Promise<void> {
     const result = await request('/health');
     const csp = result.headers.get('content-security-policy') || '';
@@ -231,7 +264,7 @@ export async function runSecurityProbe(opts: ProbeOptions): Promise<ProbeReport>
       });
     }
 
-    const member = await login(memberEmail, memberPassword);
+    const member = await ensureMember(admin);
     if (member.result.status === 200) {
       const adminRoute = await request('/api/admin/workspaces', {}, member.jar);
       addCheck('auth-session', 'Member privilege escalation to super-admin route', adminRoute.status === 403 ? 'pass' : 'fail', { status: adminRoute.status });

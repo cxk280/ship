@@ -32,7 +32,13 @@ router.post('/run', async (req: Request, res: Response): Promise<void> => {
   running = true;
   const target = resolveSelfOrigin(req);
   try {
-    const report = await runSecurityProbe({ baseUrl: target });
+    const report = await runSecurityProbe({
+      baseUrl: target,
+      adminEmail: process.env.SHIP_SECURITY_EMAIL,
+      adminPassword: process.env.SHIP_SECURITY_PASSWORD,
+      memberEmail: process.env.SHIP_SECURITY_MEMBER_EMAIL,
+      memberPassword: process.env.SHIP_SECURITY_MEMBER_PASSWORD,
+    });
     res.json(report);
   } catch (err) {
     console.error('Security probe run failed:', err);

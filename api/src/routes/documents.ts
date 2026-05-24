@@ -6,6 +6,7 @@ import { isWorkspaceAdmin } from '../middleware/visibility.js';
 import { handleVisibilityChange, handleDocumentConversion, invalidateDocumentCache, broadcastToUser } from '../collaboration/index.js';
 import { extractHypothesisFromContent, extractSuccessCriteriaFromContent, extractVisionFromContent, extractGoalsFromContent, checkDocumentCompleteness } from '../utils/extractHypothesis.js';
 import { loadContentFromYjsState } from '../utils/yjsConverter.js';
+import { sanitizeTitle, sanitizeTipTapContent } from '../utils/sanitizeContent.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -492,21 +493,24 @@ router.patch('/:id/content', authMiddleware, async (req: Request, res: Response)
     const workspaceId = String(req.workspaceId);
 
     // Validate content structure
-    const { content } = req.body;
-    if (!content || typeof content !== 'object') {
+    const { content: rawContent } = req.body;
+    if (!rawContent || typeof rawContent !== 'object') {
       res.status(400).json({ error: 'Content is required and must be a valid TipTap JSON object' });
       return;
     }
 
     // Validate TipTap JSON structure
-    if (content.type !== 'doc' || !Array.isArray(content.content)) {
+    if (rawContent.type !== 'doc' || !Array.isArray(rawContent.content)) {
       res.status(400).json({
         error: 'Invalid content structure. Content must be a TipTap document with type "doc" and a content array.',
         expected: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '...' }] }] },
-        received: { type: content.type, hasContentArray: Array.isArray(content.content) },
+        received: { type: rawContent.type, hasContentArray: Array.isArray(rawContent.content) },
       });
       return;
     }
+
+    // Strip HTML tags from plain-text nodes (code blocks preserved) before storage.
+    const content = sanitizeTipTapContent(rawContent);
 
     // Verify document exists and user can access it
     const { canAccess, doc: existing } = await canAccessDocument(id, userId, workspaceId);
@@ -572,7 +576,11 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
-    const { title, document_type, parent_id, program_id, sprint_id, properties, content, belongs_to } = parsed.data;
+    const { title: rawTitle, document_type, parent_id, program_id, sprint_id, properties, content: rawContent, belongs_to } = parsed.data;
+    // Strip HTML tags from the title and plain-text content nodes (defense-in-depth
+    // on top of React/TipTap output encoding; code blocks are preserved).
+    const title = sanitizeTitle(rawTitle) as string;
+    const content = rawContent ? sanitizeTipTapContent(rawContent) : rawContent;
     let { visibility } = parsed.data;
 
     // If parent_id is provided and visibility is not specified, inherit from parent
