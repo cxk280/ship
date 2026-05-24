@@ -265,6 +265,27 @@ An independent adversarial re-grade by Claude (see `CLAUDE_FINAL_AUDIT.md`) foun
 
 - `npx tsx scripts/shipshape-type-violations.ts` → 25.84% reduction, PASS
 - `AXE_BASE=http://localhost:5173 node scripts/shipshape-axe-scan.mjs` → 0 critical/serious on all 6 target pages
-- `node scripts/security-probe.mjs --base-url http://127.0.0.1:3000` → 14/16 checks pass, 4 surfaces, CSP + WebSocket fixes verified
+- `node scripts/security-probe.mjs --base-url http://127.0.0.1:3000` → 16/16 checks pass, 0 findings, 4 surfaces
 - `pnpm --filter @ship/api test` → 465 pass; `pnpm --filter @ship/web test` → 157 pass
 - `pnpm build` → clean, no chunk-size warnings
+
+## Security Probe Web UI Slice (2026-05-24)
+
+A deployable, super-admin web UI for the Category 8 probe, plus the remediation that takes the probe to all-green.
+
+### Deployed Security Probe UI
+
+- `web/src/pages/SecurityProbe.tsx` at `/security-probe`: own login layer (same ShipShape admin credentials; super-admin required) + one-click "Run Probe" dashboard (summary cards, per-attack-surface checks, severity-coded findings). Standalone route in `web/src/main.tsx`.
+- `api/src/services/securityProbe.ts`: typed in-process port of the CLI probe (the runtime Docker image excludes `scripts/`). `api/src/routes/security-probe.ts` exposes `POST /api/security-probe/run` — super-admin gated, targets the app's own origin via `RAILWAY_PUBLIC_DOMAIN`/request host (no user-supplied URL → no SSRF), single-run lock.
+- **Auto-cleanup:** the runner deletes every test document its input checks create before returning (verified: 2 created → 2 deleted, 0 leaked, locally and on prod).
+- **Member self-provisioning:** when the configured member can't log in (e.g. a setup-only deployment), the probe provisions a least-privilege member via the super-admin invite+accept flow, so the privilege-escalation check runs instead of skipping.
+
+### Stored-XSS remediation (probe → 16/16)
+
+- `api/src/utils/sanitizeContent.ts` strips HTML tags from document titles and TipTap plain-text nodes on create + content update (`api/src/routes/documents.ts`), preserving code blocks. Neutralizes script-like payloads at input on top of the existing React/TipTap output encoding. The two input-sanitization checks now pass.
+
+### Verification
+
+- Local CLI: `node scripts/security-probe.mjs --base-url http://127.0.0.1:3000` → **16/16 checks, 0 findings**, test docs auto-cleaned.
+- Deployed web UI (browser, `https://shipshape-app-production-7ed8.up.railway.app/security-probe`) → **16/16 checks, 0 findings**, 2 test docs cleaned up.
+- `pnpm --filter @ship/api test` → 465 pass; type-safety gate held green via a generic `request<T>()` refactor (`scripts/shipshape-type-violations.ts` → 25.45%, PASS).

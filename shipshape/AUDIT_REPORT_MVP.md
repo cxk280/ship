@@ -4,7 +4,7 @@ Audit date: 2026-05-18
 
 Scope rule: this report is diagnosis only. No product-code fixes were made while collecting these baselines.
 
-> **Final-audit correction (2026-05-24):** An independent adversarial re-grade (`shipshape/CLAUDE_FINAL_AUDIT.md`) corrected two Category-7 issues that the implementation passes got wrong: (1) a removed-ARIA-tree change that broke existing E2E tests was reverted/restored, and (2) the "0 Critical/Serious axe violations on target pages" claim was initially **false** — a live `axe-core` scan still found serious color-contrast violations on Projects (12 nodes) and My Week (4 nodes). Those were fixed (`Projects.tsx`, `MyWeekPage.tsx`, `FilterTabs.tsx`) and **all six target pages now scan clean**, reproducible via `scripts/shipshape-axe-scan.mjs`. A CSP/Google-Fonts defect on the deployed app (Category 8) was also fixed in `api/src/app.ts`, and a reproducible type-safety counter (`scripts/shipshape-type-violations.ts`, 25.84% reduction, gate PASS) was added. See the final audit for full before/after evidence.
+> This is the MVP-checkpoint audit snapshot (Phase 1 diagnosis). Post-MVP implementation, remediation, and the final adversarial re-grade are tracked separately in `CLAUDE_FINAL_AUDIT.md` and `FIXES_IMPLEMENTATION.md`.
 
 ## Severity Rubric
 

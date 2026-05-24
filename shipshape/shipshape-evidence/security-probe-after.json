@@ -1,63 +1,15 @@
 {
   "tool": "shipshape-security-probe",
-  "startedAt": "2026-05-24T14:34:13.917Z",
+  "startedAt": "2026-05-24T16:25:22.932Z",
   "target": "http://127.0.0.1:3000",
-  "findings": [
-    {
-      "category": "input-sanitization",
-      "severity": "medium",
-      "title": "Document title accepts raw HTML event-handler payload",
-      "description": "React escaping mitigates normal rendering, but storing raw script-like titles increases downstream XSS risk in future renderers, exports, logs, and notifications.",
-      "reproductionSteps": [
-        "Login as dev@ship.local",
-        "POST http://127.0.0.1:3000/api/documents with title <img src=x onerror=alert('shipshape')>",
-        "Observe the raw payload returned and stored as the document title"
-      ],
-      "evidence": {
-        "status": 201,
-        "id": "159f24f0-13fa-4205-be53-5074e71d68d2",
-        "title": "<img src=x onerror=alert('shipshape')>"
-      },
-      "status": "open"
-    },
-    {
-      "category": "input-sanitization",
-      "severity": "medium",
-      "title": "Document content accepts raw HTML event-handler payload text",
-      "description": "TipTap text rendering usually escapes text nodes, but storing raw script-like content increases downstream XSS risk in exports, previews, search snippets, notifications, and future renderers.",
-      "reproductionSteps": [
-        "Login as dev@ship.local",
-        "PATCH http://127.0.0.1:3000/api/documents/159f24f0-13fa-4205-be53-5074e71d68d2/content with a TipTap text node containing <svg onload=alert('shipshape-content')>",
-        "Observe the raw payload returned and stored in document content"
-      ],
-      "evidence": {
-        "status": 200,
-        "id": "159f24f0-13fa-4205-be53-5074e71d68d2",
-        "content": {
-          "type": "doc",
-          "content": [
-            {
-              "type": "paragraph",
-              "content": [
-                {
-                  "text": "<svg onload=alert('shipshape-content')>",
-                  "type": "text"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "status": "open"
-    }
-  ],
+  "findings": [],
   "checks": [
     {
       "category": "manual-review",
       "name": "CSP script-src does not allow unsafe-inline",
       "status": "pass",
       "details": {
-        "csp": "default-src 'self';script-src 'self' 'nonce-yfQYFI9C2F6RRRVBggDRVg==';style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;img-src 'self' data: blob: https:;connect-src 'self' wss: ws:;font-src 'self' data: https://fonts.gstatic.com;object-src 'none';frame-src 'none';base-uri 'self';form-action 'self';frame-ancestors 'self';script-src-attr 'none';upgrade-insecure-requests"
+        "csp": "default-src 'self';script-src 'self' 'nonce-VlakWd25Equt3NP6JKPC2Q==';style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;img-src 'self' data: blob: https:;connect-src 'self' wss: ws:;font-src 'self' data: https://fonts.gstatic.com;object-src 'none';frame-src 'none';base-uri 'self';form-action 'self';frame-ancestors 'self';script-src-attr 'none';upgrade-insecure-requests"
       }
     },
     {
@@ -120,21 +72,21 @@
     {
       "category": "input-sanitization",
       "name": "Stored XSS title payload rejected or sanitized",
-      "status": "fail",
+      "status": "pass",
       "details": {
         "status": 201,
-        "acceptedRawPayload": true,
-        "id": "159f24f0-13fa-4205-be53-5074e71d68d2"
+        "acceptedRawPayload": false,
+        "id": "4c21858b-49fb-4579-8da7-94cac7ff354f"
       }
     },
     {
       "category": "input-sanitization",
       "name": "Stored XSS content payload rejected or sanitized",
-      "status": "fail",
+      "status": "pass",
       "details": {
         "status": 200,
-        "acceptedRawPayload": true,
-        "id": "159f24f0-13fa-4205-be53-5074e71d68d2"
+        "acceptedRawPayload": false,
+        "id": "4c21858b-49fb-4579-8da7-94cac7ff354f"
       }
     },
     {
@@ -176,7 +128,7 @@
       "status": "pass",
       "details": {
         "status": 201,
-        "id": "04205521-8c2c-49d4-bf54-9dc1478cbcac"
+        "id": "94c53187-7e54-4d6c-be87-aa9aec354a77"
       }
     },
     {
@@ -242,16 +194,12 @@
   ],
   "summary": {
     "totalChecks": 16,
-    "passedChecks": 14,
-    "failedChecks": 2,
+    "passedChecks": 16,
+    "failedChecks": 0,
     "skippedChecks": 0,
-    "totalFindings": 2,
-    "bySeverity": {
-      "medium": 2
-    },
-    "byCategory": {
-      "input-sanitization": 2
-    }
+    "totalFindings": 0,
+    "bySeverity": {},
+    "byCategory": {}
   },
-  "completedAt": "2026-05-24T14:34:17.194Z"
+  "completedAt": "2026-05-24T16:25:26.706Z"
 }

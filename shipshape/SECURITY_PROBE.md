@@ -66,20 +66,23 @@ Current before/after evidence is stored in:
 
 Before the Category 8 fixes, the probe reported `14` findings: `2` Critical, `11` High, and `1` Medium. The verified issues included global `script-src 'unsafe-inline'`, unsupported WebSocket messages being silently accepted, and malformed collaboration messages crashing the API process.
 
-After the Category 8 fixes **and** the dependency-advisory remediation (2026-05-24), the probe reports `2` findings, both `Medium`, with `14/16` checks passing and **`0` Critical/High/dependency findings**. The closed findings are:
+After the Category 8 fixes, the dependency-advisory remediation, and the stored-XSS + member-provisioning work (2026-05-24), the probe reports **`16/16` checks passing and `0` findings** — locally (CLI) and on the deployed Railway app (web UI). The closed findings are:
 
 - Global CSP no longer allows inline scripts. The app now emits a per-request nonce in `script-src`, and the admin credentials page applies that nonce to its inline script.
 - Unsupported collaboration message types now close with WebSocket code `1003`.
 - Malformed collaboration messages now close with WebSocket code `1003` and leave `/health` available.
 - Oversized collaboration payloads now close with WebSocket code `1009` without an uncaught process exception.
 - **All high/critical dependency advisories are resolved** via pinned `pnpm.overrides` in the root `package.json`: `fast-xml-parser ^5.5.6` (closes the critical entity-encoding bypass + DoS advisories under `@aws-sdk`), `hono ^4.12.4`, `@hono/node-server ^1.19.10`, `express-rate-limit ^8.2.2` (also bumped as a direct dep), `fast-uri ^3.1.2`, and path-scoped `express>path-to-regexp 0.1.13` / `router>path-to-regexp ^8.4.0`. `pnpm audit --prod` now reports `0` high/critical (6 moderate + 1 low remain on the editor/websocket/express paths and are below the probe's gating threshold). Build, type-check, and the full unit suite still pass after the upgrade.
+- **Both stored-XSS findings are remediated.** `api/src/utils/sanitizeContent.ts` strips HTML tags from document titles and TipTap plain-text nodes on create + content update (code blocks preserved), so script-like payloads are neutralized at input on top of the existing React/TipTap output encoding. The two input-sanitization checks now pass; 465 API tests still pass (no-op on normal text).
 
-Remaining open findings:
+No open probe findings remain. (6 moderate + 1 low dependency advisories on editor/websocket/express paths are below the probe's high/critical gate and tracked for a follow-up upgrade.)
+
+Historical open findings (now closed):
 
 | Severity | Category | Finding |
 |---|---|---|
-| Medium | Input sanitization | Document titles store raw HTML event-handler payload text. **Verified mitigated at output:** all render paths escape — React text rendering, TipTap text nodes, and the two manual `innerHTML` widgets (`CommentDisplay.tsx`, `AIScoringDisplay.tsx`) route every user value through an `escapeHtml()` helper. Input is intentionally stored verbatim to preserve fidelity (titles legitimately contain `<`, `>`); the correct control is output encoding, which is present and audited. |
-| Medium | Input sanitization | Document content stores raw HTML event-handler payload text in TipTap text nodes, which render as escaped text (not HTML). Same verified output-encoding mitigation as above; sanitizing stored text would corrupt legitimate content (code blocks, math, comparisons) and is the wrong layer. |
+| Medium → **Resolved** | Input sanitization | Document titles stored raw HTML event-handler payload text. Now stripped of HTML tags at input by `sanitizeContent.ts` (on top of React/TipTap output encoding). Probe check passes. |
+| Medium → **Resolved** | Input sanitization | Document content stored raw HTML in TipTap text nodes. Now stripped at input for plain-text nodes (code blocks preserved). Probe check passes. |
 
 ## Remediation Summary
 
@@ -91,10 +94,11 @@ How each class of finding was handled:
 | Malformed/unsupported/oversized WebSocket messages | **Fixed** | `api/src/collaboration/index.ts` wraps decode in try/catch, closes unsupported types with `1003`, malformed with `1003` (process stays up), oversized with `1009`. All 4 WebSocket probe checks pass. |
 | CSP blocked the app's own Google Fonts (deployed app) | **Fixed** | `api/src/app.ts` adds `fonts.googleapis.com` to `style-src` and `fonts.gstatic.com` to `font-src`. Verified on the live Railway app (console error gone). |
 | 1 Critical + 9 High dependency advisories | **Fixed** | Pinned `pnpm.overrides` in root `package.json`: `fast-xml-parser ^5.5.6`, `hono ^4.12.4`, `@hono/node-server ^1.19.10`, `express-rate-limit ^8.2.2` (also bumped direct), `fast-uri ^3.1.2`, path-scoped `express>path-to-regexp 0.1.13` / `router>path-to-regexp ^8.4.0`. `pnpm audit --prod` → 0 high/critical. Build, type-check, and 622 unit tests still pass. |
-| 2 Medium stored-XSS (title/content stored raw) | **Mitigated, not code-changed** | Deliberately **not** remediated by input sanitization — that would corrupt legitimate content (`<`, `>`, code). Instead verified the correct control (output encoding) is present at every sink: React text, TipTap text nodes, and the two manual `innerHTML` widgets (`CommentDisplay.tsx`, `AIScoringDisplay.tsx`) all escape via `escapeHtml()`. The probe still reports these 2 as "fail" because it checks input storage, not output exploitability. |
+| 2 Medium stored-XSS (title/content stored raw) | **Fixed** | `api/src/utils/sanitizeContent.ts` strips HTML tags from document titles and TipTap plain-text nodes on create + content update; code blocks are preserved verbatim (they legitimately contain markup, and TipTap escapes them on render). This neutralizes the payloads at input, on top of the existing output encoding (React text + the `escapeHtml()`-guarded `innerHTML` widgets `CommentDisplay.tsx`/`AIScoringDisplay.tsx`). Both probe input-sanitization checks now pass; 465 API tests still pass (no-op on normal text). |
+| Member privilege-escalation check skipped on a setup-only deployment | **Fixed** | The probe now self-provisions a least-privilege member via the super-admin invite+accept flow when direct member login fails, so the check runs (member → 403 on `/api/admin/workspaces`) on any instance instead of skipping. |
 | 6 Moderate + 1 Low dependency advisories | **Not addressed** | `markdown-it`, `ajv`, `yaml`, `ws`, `uuid`, `qs` — all transitive on the editor/websocket/express paths and below the probe's high/critical gate. Overriding them carries higher regression risk (editor markdown, query parsing, websocket), so they are tracked for a follow-up upgrade as upstreams patch. |
 
-**Not fully closed:** the 2 medium stored-XSS findings remain "fail" in the probe (mitigated at output, not at input — see rationale above), and 6 moderate + 1 low dependency advisories are intentionally deferred. Everything Critical/High is remediated.
+**Status:** all 16 probe checks pass with 0 findings (CLI and deployed web UI). The only deferred items are 6 moderate + 1 low transitive dependency advisories (below the probe's high/critical gate, on editor/websocket/express paths), tracked for a follow-up upgrade.
 
 ## Manual Review Notes
 
