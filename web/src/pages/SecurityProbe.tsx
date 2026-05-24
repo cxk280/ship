@@ -61,7 +61,7 @@ function LoginView({ onAuthed }: { onAuthed: () => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+    <div className="h-screen overflow-y-auto bg-background flex items-center justify-center p-6">
       <form onSubmit={submit} className="w-full max-w-[420px] rounded-2xl border border-border bg-surface p-8 space-y-5">
         <div className="space-y-1.5">
           <h1 className="text-xl font-bold text-foreground">🛡 ShipShape Security Probe</h1>
@@ -147,7 +147,7 @@ function Dashboard() {
   const highCritical = report ? (report.summary.bySeverity.critical || 0) + (report.summary.bySeverity.high || 0) : 0;
 
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="h-screen overflow-y-auto bg-background p-8">
       <div className="mx-auto max-w-[1320px] space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -239,7 +239,7 @@ export function SecurityProbePage() {
   useEffect(() => { void checkAuth(); }, [checkAuth]);
 
   if (authed === null) {
-    return <div className="min-h-screen bg-background flex items-center justify-center text-muted">Loading…</div>;
+    return <div className="h-screen overflow-y-auto bg-background flex items-center justify-center text-muted">Loading…</div>;
   }
   if (!authed) return <LoginView onAuthed={() => setAuthed(true)} />;
   return <Dashboard />;
