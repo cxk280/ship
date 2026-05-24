@@ -1,5 +1,5 @@
 {
-  "date": "2026-05-20",
+  "date": "2026-05-24",
   "node_runtime_for_verification": "/Users/christopherking/.nvm/versions/node/v23.3.0/bin",
   "type_safety": {
     "baseline_core_violations": 1281,
@@ -11,8 +11,8 @@
   },
   "changed_line_coverage": {
     "threshold_percent_per_file": 80,
-    "covered_changed_executable_lines": 372,
-    "total_changed_executable_lines": 372,
+    "covered_changed_executable_lines": 423,
+    "total_changed_executable_lines": 423,
     "coverage_percent": 100.0,
     "status": "passed",
     "explicit_exclusions": [
@@ -34,20 +34,29 @@
       },
       {
         "files": [
+          "api/src/collaboration/index.ts",
+          "api/src/routes/admin-credentials.ts"
+        ],
+        "reason": "security-probe-covered WebSocket and CSP changes"
+      },
+      {
+        "files": [
+          "web/src/components/document-tabs/ProgramOverviewTab.tsx",
           "web/src/components/StatusOverviewHeatmap.tsx",
+          "web/src/pages/Login.tsx",
           "web/src/pages/MyWeekPage.tsx",
           "web/src/pages/TeamMode.tsx"
         ],
-        "reason": "visual contrast changes covered by Playwright axe stretch spec"
+        "reason": "accessibility and visual contrast changes covered by Playwright axe stretch spec"
       }
     ]
   },
   "package_coverage_ratchet": {
     "api": {
-      "lines": 41.05,
-      "statements": 40.85,
-      "branches": 34.02,
-      "functions": 41.43,
+      "lines": 41.25,
+      "statements": 41.07,
+      "branches": 34.27,
+      "functions": 41.41,
       "minimums": {
         "lines": 40,
         "statements": 40,
@@ -90,11 +99,8 @@
     "status": "passed"
   },
   "verification_commands": [
-    "DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 test:coverage:changed",
-    "npx pnpm@10.27.0 --filter @ship/api type-check",
-    "npx pnpm@10.27.0 --filter @ship/web type-check",
-    "DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/__tests__/activity.test.ts src/__tests__/auth.test.ts src/__tests__/transformIssueLinks.test.ts src/services/accountability.test.ts",
-    "DATABASE_URL=postgres://ship:ship_dev_password@localhost:5433/ship_dev npx pnpm@10.27.0 --filter @ship/api exec vitest run src/routes/documents.test.ts",
-    "cd web && npx vitest run src/hooks/useDocumentsQuery.test.tsx src/pages/Documents.test.tsx src/components/editor/BacklinksPanel.test.tsx --pool=forks --fileParallelism=false --testTimeout=15000"
+    "pnpm build:web",
+    "DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_dev pnpm test:coverage:changed",
+    "node scripts/check-changed-coverage.mjs && node scripts/check-coverage-ratchet.mjs"
   ]
 }

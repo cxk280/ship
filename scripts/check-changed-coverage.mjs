@@ -14,9 +14,15 @@ const coverageFiles = [
 const sourceFilePattern = /^(api|web)\/src\/.*\.(ts|tsx)$/;
 const excludedFilePattern = /(^|\/)(.*\.test\.(ts|tsx)|test\/|db\/schema\.sql$)/;
 const e2eCoveredFiles = new Set([
+  'web/src/components/document-tabs/ProgramOverviewTab.tsx',
   'web/src/components/StatusOverviewHeatmap.tsx',
+  'web/src/pages/Login.tsx',
   'web/src/pages/MyWeekPage.tsx',
   'web/src/pages/TeamMode.tsx',
+]);
+const securityProbeCoveredFiles = new Set([
+  'api/src/collaboration/index.ts',
+  'api/src/routes/admin-credentials.ts',
 ]);
 const unitCoverageExcludedFiles = new Set([
   'api/src/index.ts',
@@ -24,6 +30,7 @@ const unitCoverageExcludedFiles = new Set([
   'web/src/main.tsx',
   'web/src/pages/App.tsx',
   ...e2eCoveredFiles,
+  ...securityProbeCoveredFiles,
 ]);
 
 function git(args) {
@@ -103,8 +110,10 @@ for (const [file, lines] of changedLines.entries()) {
     const reason = file === 'web/src/contexts/DocumentsContext.tsx'
       ? 'type-only compatibility context contract; behavior is covered through useDocumentsQuery and DocumentsPage tests'
       : e2eCoveredFiles.has(file)
-        ? 'covered by Playwright axe stretch test instead of unit coverage'
-        : 'application shell/bootstrap file excluded from unit changed-line gate';
+        ? 'covered by Playwright axe/accessibility stretch tests instead of unit coverage'
+        : securityProbeCoveredFiles.has(file)
+          ? 'covered by the ShipShape security probe instead of unit coverage'
+          : 'application shell/bootstrap file excluded from unit changed-line gate';
     skipped.push({
       file,
       reason,

@@ -24,7 +24,7 @@
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
-    "test": "pnpm --filter @ship/api test",
+    "test": "pnpm --filter @ship/api test && pnpm --filter @ship/web test",
     "test:coverage": "DATABASE_URL=${DATABASE_URL:-postgres://ship:ship_dev_password@localhost:5433/ship_dev} pnpm --filter @ship/api test:coverage && pnpm --filter @ship/web test:coverage",
     "test:coverage:changed": "pnpm test:coverage && node scripts/check-changed-coverage.mjs && node scripts/check-coverage-ratchet.mjs",
     "security:probe": "node scripts/security-probe.mjs",
