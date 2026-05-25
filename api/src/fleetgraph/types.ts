@@ -1,7 +1,7 @@
 // Shared FleetGraph types: the vocabulary the graph carries between nodes.
 
 export type Mode = 'proactive' | 'ondemand';
-export type TriggerKind = 'mutation' | 'cron' | 'chat';
+export type TriggerKind = 'mutation' | 'cron' | 'chat' | 'digest';
 export type Severity = 'info' | 'low' | 'medium' | 'high';
 export type ApprovalDecision = 'approve' | 'dismiss' | 'snooze';
 

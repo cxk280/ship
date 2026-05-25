@@ -10,7 +10,7 @@ import { FleetGraphState, type FleetGraphStateType } from './state.js';
 import {
   fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
   fetchWorkspaceMeta, fetchSprintProgress,
-  type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta,
+  type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta, type ProjectRow,
 } from './fetch.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
@@ -243,6 +243,83 @@ function respond(_state: S): Update {
   return {};
 }
 
+// ---------------------------------------------------------------- daily digest (tier 2 synthesis)
+async function synthesizeDigests(
+  projects: ProjectRow[],
+  issuesByProject: Map<string, IssueRow[]>,
+  weeks: WeekRow[],
+  team: PersonRow[],
+): Promise<{ texts: Map<string, string>; cost?: { tier1Tokens: number; tier2Tokens: number; usd: number } }> {
+  const texts = new Map<string, string>();
+  const fallback = (p: ProjectRow) => {
+    const iss = issuesByProject.get(p.id) ?? [];
+    const unassigned = iss.filter((i) => !i.assigneeId).length;
+    return `${iss.length} open issue(s)${unassigned ? `, ${unassigned} unassigned` : ''}.`;
+  };
+  if (!isLlmAvailable()) {
+    for (const p of projects) texts.set(p.id, fallback(p));
+    return { texts };
+  }
+  // Chunk so each response fits within the token cap (one big call truncates the JSON).
+  const sys = `You are FleetGraph writing a short DAILY DIGEST for each project. For each project, in 2-4 sentences: what's moving, what's at risk (stale/overdue/unassigned/overloaded), and the single most important next action. Be concrete and reference issue numbers (num). Respond ONLY with JSON: {"digests":[{"projectId":"<id>","text":"<digest>"}]}.`;
+  const CHUNK = 5;
+  let tier2Tokens = 0, usd = 0, anyOk = false;
+  for (let k = 0; k < projects.length; k += CHUNK) {
+    const chunk = projects.slice(k, k + CHUNK);
+    const user = `Projects: ${JSON.stringify(chunk.map((p) => ({
+      id: p.id, title: p.title,
+      issues: (issuesByProject.get(p.id) ?? []).slice(0, 15).map((i) => ({ num: i.ticketNumber, title: i.title, state: i.state, priority: i.priority, assignee: i.assigneeName, due: i.dueDate, estimate: i.estimate })),
+    })))}
+Weeks: ${JSON.stringify(weeks)}
+Team: ${JSON.stringify(team.map((t) => ({ name: t.name, capacity: t.capacityHours })))}`;
+    const res = await invokeTier(2, sys, user);
+    if (!res) continue;
+    anyOk = true;
+    tier2Tokens += res.inputTokens + res.outputTokens;
+    usd += res.usd;
+    const parsed = extractJson<{ digests: { projectId: string; text: string }[] }>(res.text);
+    for (const d of parsed?.digests ?? []) texts.set(d.projectId, d.text);
+  }
+  for (const p of projects) if (!texts.has(p.id)) texts.set(p.id, fallback(p)); // fill gaps
+  return anyOk ? { texts, cost: { tier1Tokens: 0, tier2Tokens, usd } } : { texts };
+}
+
+async function digest(state: S): Promise<Update> {
+  const issues = (state.raw.issues as IssueRow[]) ?? [];
+  const projects = (state.raw.projects as ProjectRow[]) ?? [];
+  const weeks = (state.raw.weeks as WeekRow[]) ?? [];
+  const team = (state.raw.team as PersonRow[]) ?? [];
+  const admins = (state.raw.admins as string[]) ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+  const known = new Set(state.knownFindings.map((k) => k.dedupKey));
+
+  const byProject = new Map<string, IssueRow[]>();
+  for (const i of issues) {
+    if (!i.projectId) continue;
+    const arr = byProject.get(i.projectId) ?? [];
+    arr.push(i);
+    byProject.set(i.projectId, arr);
+  }
+  // Projects with open work that haven't been digested today (one digest per project per day).
+  const targets = projects.filter((p) => (byProject.get(p.id)?.length ?? 0) > 0 && !known.has(`digest:${p.id}:${today}`));
+  if (targets.length === 0) return {};
+
+  const { texts, cost } = await synthesizeDigests(targets, byProject, weeks, team);
+  const ownerUserId = (personId: string | null) => (personId ? team.find((t) => t.personId === personId)?.userId : null) ?? null;
+  const findings: Finding[] = targets.map((p) => ({
+    dedupKey: `digest:${p.id}:${today}`,
+    type: 'digest',
+    severity: 'info',
+    entityId: p.id,
+    entityType: 'project',
+    title: `Daily digest — ${p.title}`,
+    detail: texts.get(p.id) ?? `${(byProject.get(p.id) ?? []).length} open issue(s).`,
+    recipients: [ownerUserId(p.ownerId), p.accountableId, ...admins].filter((x): x is string => !!x),
+    contentHash: today,
+  }));
+  return cost ? { findings, cost } : { findings };
+}
+
 // ---------------------------------------------------------------- classify + act
 function classify(state: S): Update {
   const actions: ProposedAction[] = state.findings.map((f) => f.proposedAction).filter((a): a is ProposedAction => !!a);
@@ -403,6 +480,7 @@ export function buildGraph() {
     .addNode('merge', merge)
     .addNode('answerNode', answer)
     .addNode('respond', respond)
+    .addNode('digest', digest)
     .addNode('detect', detect)
     .addNode('dedup', dedup)
     .addNode('triage', triage)
@@ -433,10 +511,12 @@ export function buildGraph() {
   g.addEdge('fetchProjects', 'merge');
   g.addEdge('fetchMeta', 'merge');
 
-  g.addConditionalEdges('merge', (s: S) => (s.mode === 'ondemand' ? 'answerNode' : 'detect'), {
-    answerNode: 'answerNode',
-    detect: 'detect',
-  });
+  g.addConditionalEdges(
+    'merge',
+    (s: S) => (s.triggerKind === 'digest' ? 'digest' : s.mode === 'ondemand' ? 'answerNode' : 'detect'),
+    { digest: 'digest', answerNode: 'answerNode', detect: 'detect' },
+  );
+  g.addEdge('digest', 'surfaceAuto'); // digest findings are autonomous → recorded + notified
   // On-demand: if the chat proposed a write, route it through the SAME HITL gate; else just respond.
   g.addConditionalEdges(
     'answerNode',

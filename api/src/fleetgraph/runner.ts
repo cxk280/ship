@@ -55,6 +55,20 @@ export async function runCronSweep(workspaceId: string): Promise<void> {
   }
 }
 
+/** Daily synthesis: one digest finding per active project (autonomous). */
+export async function runDigest(workspaceId: string): Promise<void> {
+  const graph = await getGraph();
+  const runId = `digest:${randomUUID()}`;
+  try {
+    await graph.invoke(
+      { mode: 'proactive', triggerKind: 'digest', workspaceId, actorUserId: null, runId, scope: {} },
+      cfg(runId, ['fleetgraph', 'proactive', 'digest'], { workspaceId }),
+    );
+  } catch (err) {
+    if (!isGraphInterrupt(err)) throw err;
+  }
+}
+
 /** On-demand chat scoped to the current view. Returns the answer + the run id. */
 export async function runOndemandChat(params: {
   workspaceId: string;
