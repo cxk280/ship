@@ -13,6 +13,7 @@ import {
   type BelongsToEntry,
 } from '../utils/document-crud.js';
 import { broadcastToUser } from '../collaboration/index.js';
+import { enqueueMutationRun } from '../fleetgraph/triggers.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -965,6 +966,18 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     // Post-commit operations (non-transactional)
+
+    // FleetGraph: enqueue a proactive run scoped to this issue (debounced, fire-and-forget).
+    try {
+      enqueueMutationRun({
+        workspaceId: req.workspaceId!,
+        entityId: id!,
+        entityType: 'issue',
+        changedFields: changes.map((c) => c.field),
+      });
+    } catch (e) {
+      console.error('[FleetGraph] enqueue failed:', e);
+    }
 
     // Check if a NEW sprint association was added and this is the first issue in that sprint
     if (belongsToChanged) {

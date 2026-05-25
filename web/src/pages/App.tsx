@@ -35,6 +35,7 @@ import { ProjectSetupWizard, ProjectSetupData } from '@/components/ProjectSetupW
 import { SelectionPersistenceProvider } from '@/contexts/SelectionPersistenceContext';
 import { ActionItemsModal } from '@/components/ActionItemsModal';
 import { AccountabilityBanner } from '@/components/AccountabilityBanner';
+import { FleetGraphDock } from '@/components/fleetgraph/FleetGraphDock';
 import { ProjectContextSidebar } from '@/components/sidebars/ProjectContextSidebar';
 
 type Mode = 'docs' | 'issues' | 'projects' | 'programs' | 'sprints' | 'team' | 'settings' | 'dashboard' | 'project-context';
@@ -556,6 +557,9 @@ export function AppLayout() {
         {/* Portal content from Editor will be rendered here via React Portal */}
         <aside id="properties-portal" aria-label="Document properties" className="flex flex-col" />
       </div>
+
+      {/* FleetGraph agent: context-aware chat + proactive findings inbox */}
+      <FleetGraphDock />
 
       {/* Command Palette (Cmd+K) */}
       <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />

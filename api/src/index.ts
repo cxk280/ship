@@ -48,9 +48,17 @@ async function main() {
   setupCollaboration(server);
 
   // Start server
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`API server running on http://localhost:${PORT}`);
     console.log(`CORS origin: ${CORS_ORIGIN}`);
+
+    // Start FleetGraph proactive triggers (cron sweep + mutation queue).
+    try {
+      const { startFleetGraph } = await import('./fleetgraph/triggers.js');
+      startFleetGraph();
+    } catch (err) {
+      console.error('[FleetGraph] failed to start:', err);
+    }
   });
 }
 

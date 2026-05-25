@@ -35,11 +35,23 @@ async function migrate() {
   try {
     console.log('Running database migrations...');
 
-    // Step 1: Run schema.sql for initial setup
+    // Step 1: Run schema.sql for initial setup.
+    // Tolerate "already exists" so re-runs on an existing DB don't abort before the
+    // migration loop (schema.sql is meant to be idempotent, but some objects predate the
+    // IF NOT EXISTS guards).
     const schemaPath = join(__dirname, 'schema.sql');
     const schema = readFileSync(schemaPath, 'utf-8');
-    await pool.query(schema);
-    console.log('✅ Schema applied');
+    try {
+      await pool.query(schema);
+      console.log('✅ Schema applied');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('already exists')) {
+        console.log('ℹ️  Schema objects already exist, continuing to migrations');
+      } else {
+        throw err;
+      }
+    }
 
     // Step 2: Create migrations tracking table
     await pool.query(`
@@ -88,7 +100,19 @@ async function migrate() {
         migrationsRun++;
       } catch (err) {
         await client.query('ROLLBACK');
-        throw err;
+        const msg = err instanceof Error ? err.message : String(err);
+        // If the migration's objects already exist (e.g. the DB was bootstrapped from
+        // schema.sql without backfilling migration tracking), record it as applied and
+        // continue so later migrations still run. Any other error aborts as before.
+        if (msg.includes('already exists')) {
+          await client.query(
+            'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
+            [version],
+          );
+          console.log(`  ⏭️  ${file}: objects already exist — marked applied`);
+        } else {
+          throw err;
+        }
       } finally {
         client.release();
       }

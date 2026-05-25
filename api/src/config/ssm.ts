@@ -67,6 +67,23 @@ export async function loadProductionSecrets(): Promise<void> {
   process.env.CDN_DOMAIN = cdnDomain;
   process.env.APP_BASE_URL = appBaseUrl;
 
+  // Optional: FleetGraph LangSmith tracing. Non-fatal if the params don't exist —
+  // tracing simply stays off. Bedrock needs no key (EB instance role provides creds).
+  try {
+    const [langsmithKey, langsmithProject] = await Promise.all([
+      getSSMSecret(`${basePath}/LANGCHAIN_API_KEY`).catch(() => ''),
+      getSSMSecret(`${basePath}/LANGCHAIN_PROJECT`).catch(() => ''),
+    ]);
+    if (langsmithKey) {
+      process.env.LANGCHAIN_API_KEY = langsmithKey;
+      process.env.LANGCHAIN_TRACING_V2 = process.env.LANGCHAIN_TRACING_V2 || 'true';
+      process.env.LANGCHAIN_PROJECT = langsmithProject || process.env.LANGCHAIN_PROJECT || 'fleetgraph';
+      console.log('FleetGraph: LangSmith tracing enabled from SSM');
+    }
+  } catch {
+    // tracing is optional; never block startup on it
+  }
+
   console.log('Secrets loaded from SSM Parameter Store');
   console.log(`CORS_ORIGIN: ${corsOrigin}`);
   console.log(`CDN_DOMAIN: ${cdnDomain}`);
