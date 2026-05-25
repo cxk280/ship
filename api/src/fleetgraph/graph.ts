@@ -180,21 +180,64 @@ async function reason(state: S): Promise<Update> {
 }
 
 // ---------------------------------------------------------------- on-demand answer (tier 2)
+const CHAT_ACTION_KINDS = new Set(['set_state', 'set_priority', 'reassign', 'set_estimate', 'set_due_date']);
+
 async function answer(state: S): Promise<Update> {
   const issues = (state.raw.issues as IssueRow[]) ?? [];
+  const team = (state.raw.team as PersonRow[]) ?? [];
   const weeks = state.raw.weeks ?? [];
   const question = state.userMessage ?? '';
   if (!isLlmAvailable()) {
-    const open = issues.length;
-    return { answer: `FleetGraph (offline reasoning): ${open} open issue(s) in scope. Enable Bedrock for full answers. Your question: "${question}"` };
+    return { answer: `FleetGraph (offline reasoning): ${issues.length} open issue(s) in scope. Enable a model for full answers. Your question: "${question}"` };
   }
-  const sys = `You are FleetGraph, an assistant embedded in the Ship project tool. Answer the user's question about the CURRENT view using only the provided data. Be concise and concrete. If you spot a risk (stalled, overdue, unassigned, overloaded), say so and suggest the next action — but do NOT claim to have changed anything.`;
-  const user = `Scope: ${JSON.stringify(state.scope)}\nIssues in scope:\n${JSON.stringify(
-    issues.slice(0, 60).map((i) => ({ id: i.ticketNumber, title: i.title, state: i.state, priority: i.priority, assignee: i.assigneeName, due: i.dueDate, estimate: i.estimate, idleSince: i.lastActivityAt })),
-  )}\nWeeks: ${JSON.stringify(weeks)}\n\nQuestion: ${question}`;
+  const sys = `You are FleetGraph, embedded in the Ship project tool. Answer the user's question about the CURRENT view using only the provided data; be concise and concrete.
+If — and only if — the user clearly requests a change to a specific issue, include ONE concrete "action". "entityId" is the issue's "id" from Issues in scope; NEVER invent ids. Do NOT claim to have made the change — it needs the user's approval.
+The "payload" MUST match the kind exactly:
+- reassign      -> {"assignee_id":"<userId from Team>"}
+- set_state     -> {"state":"triage|backlog|todo|in_progress|in_review|done|cancelled"}
+- set_priority  -> {"priority":"urgent|high|medium|low|none"}
+- set_estimate  -> {"estimate":<number>}
+- set_due_date  -> {"due_date":"YYYY-MM-DD"}
+Respond ONLY with JSON: {"reply":"<answer>","action":{"kind":"...","entityId":"<issue id>","payload":{...},"summary":"<what will happen>"}} — omit "action" entirely if no change was requested.
+Example: {"reply":"Reassigning to Alice.","action":{"kind":"reassign","entityId":"3f...","payload":{"assignee_id":"6e..."},"summary":"Reassign #12 to Alice"}}`;
+  const user = `Scope: ${JSON.stringify(state.scope)}
+Issues in scope: ${JSON.stringify(issues.slice(0, 60).map((i) => ({ id: i.id, num: i.ticketNumber, title: i.title, state: i.state, priority: i.priority, assignee: i.assigneeName, assigneeId: i.assigneeId, estimate: i.estimate, due: i.dueDate })))}
+Team: ${JSON.stringify(team.map((t) => ({ name: t.name, userId: t.userId })))}
+Weeks: ${JSON.stringify(weeks)}
+
+User: ${question}`;
   const res = await invokeTier(2, sys, user);
   if (!res) return { answer: 'FleetGraph could not reach the model. Please try again.' };
-  return { answer: res.text, cost: { tier1Tokens: 0, tier2Tokens: res.inputTokens + res.outputTokens, usd: res.usd } };
+  const cost = { tier1Tokens: 0, tier2Tokens: res.inputTokens + res.outputTokens, usd: res.usd };
+  const parsed = extractJson<{ reply?: string; action?: { kind: string; entityId: string; payload?: Record<string, unknown>; summary?: string } }>(res.text);
+  if (!parsed) return { answer: res.text, cost }; // model returned prose; use as-is
+  const reply = parsed.reply ?? res.text;
+  const a = parsed.action;
+  const validIssueIds = new Set(issues.map((i) => i.id));
+  const teamUserIds = new Set(team.map((t) => t.userId).filter(Boolean));
+  const payloadOk = (kind: string, p: Record<string, unknown>): boolean => {
+    switch (kind) {
+      case 'reassign': return typeof p.assignee_id === 'string' && teamUserIds.has(p.assignee_id as string);
+      case 'set_state': return typeof p.state === 'string';
+      case 'set_priority': return typeof p.priority === 'string';
+      case 'set_estimate': return Number.isFinite(Number(p.estimate));
+      case 'set_due_date': return typeof p.due_date === 'string';
+      default: return false;
+    }
+  };
+  if (a && CHAT_ACTION_KINDS.has(a.kind) && validIssueIds.has(a.entityId) && payloadOk(a.kind, a.payload ?? {})) {
+    const action: ProposedAction = {
+      kind: a.kind as ProposedAction['kind'],
+      entityId: a.entityId,
+      entityType: 'issue',
+      payload: a.payload ?? {},
+      summary: a.summary || `${a.kind.replace('_', ' ')} on issue`,
+      autonomy: 'hitl',
+      rationale: 'Requested via FleetGraph chat.',
+    };
+    return { answer: reply, proposedActions: [action], cost };
+  }
+  return { answer: reply, cost };
 }
 function respond(_state: S): Update {
   return {};
@@ -221,26 +264,32 @@ async function surfaceAuto(state: S): Promise<Update> {
   return { emitted };
 }
 
-function pickHitlFinding(state: S): Finding | undefined {
+// Returns the top HITL action to gate on. Proactive findings carry the action; on-demand chat
+// supplies a standalone proposedAction (no finding). Finding is optional in the result.
+function pickHitlAction(state: S): { action: ProposedAction; finding?: Finding } | undefined {
   const order = { high: 0, medium: 1, low: 2, info: 3 } as const;
-  return [...state.findings]
-    .filter((f) => f.proposedAction?.autonomy === 'hitl')
+  const f = [...state.findings]
+    .filter((x) => x.proposedAction?.autonomy === 'hitl')
     .sort((a, b) => order[a.severity] - order[b.severity])[0];
+  if (f) return { action: f.proposedAction!, finding: f };
+  const standalone = state.proposedActions.find((a) => a.autonomy === 'hitl');
+  return standalone ? { action: standalone } : undefined;
 }
 
 // HUMAN-IN-THE-LOOP gate: persists a pending approval, notifies, then interrupts.
 async function humanGate(state: S): Promise<Update> {
-  const finding = pickHitlFinding(state)!;
-  const action = finding.proposedAction!;
-  const recipients = finding.recipients.length ? finding.recipients : ((state.raw.admins as string[]) ?? []);
+  const { action, finding } = pickHitlAction(state)!;
+  const recipients = finding?.recipients?.length
+    ? finding.recipients
+    : (state.actorUserId ? [state.actorUserId] : ((state.raw.admins as string[]) ?? []));
 
-  const findingId = await recordFinding(state.workspaceId, finding, state.runId, 'open');
+  const findingId = finding ? await recordFinding(state.workspaceId, finding, state.runId, 'open') : null;
   const { created } = await upsertPendingApproval({
     workspaceId: state.workspaceId,
     threadId: state.runId,
     findingId,
-    entityId: finding.entityId,
-    entityType: finding.entityType,
+    entityId: finding?.entityId ?? action.entityId,
+    entityType: finding?.entityType ?? action.entityType,
     summary: action.summary,
     proposedAction: action,
     recipientId: recipients[0] ?? null,
@@ -248,14 +297,14 @@ async function humanGate(state: S): Promise<Update> {
   if (created) {
     for (const uid of recipients) {
       broadcastToUser(uid, 'fleetgraph:interrupt', {
-        threadId: state.runId, title: finding.title, detail: finding.detail,
-        summary: action.summary, severity: finding.severity, entityId: finding.entityId,
+        threadId: state.runId, title: finding?.title ?? action.summary, detail: finding?.detail ?? action.rationale ?? '',
+        summary: action.summary, severity: finding?.severity ?? 'medium', entityId: action.entityId,
       });
     }
   }
 
   // Pause here until a human resumes with a decision.
-  const resume = interrupt({ kind: 'approval', finding, action }) as {
+  const resume = interrupt({ kind: 'approval', action, finding }) as {
     decision: 'approve' | 'dismiss' | 'snooze';
     snoozeUntil?: string;
     userId?: string;
@@ -269,14 +318,20 @@ async function humanGate(state: S): Promise<Update> {
 }
 
 async function executeApproved(state: S): Promise<Update> {
-  const finding = pickHitlFinding(state)!;
-  const action = finding.proposedAction!;
+  const { action, finding } = pickHitlAction(state)!;
   const actor = state.actorUserId; // the approver
 
-  const FIELD_BY_KIND: Record<string, string> = { set_state: 'state', set_priority: 'priority', reassign: 'assignee_id' };
+  const FIELD_BY_KIND: Record<string, string> = {
+    set_state: 'state', set_priority: 'priority', reassign: 'assignee_id',
+    set_estimate: 'estimate', set_due_date: 'due_date',
+  };
   const field = FIELD_BY_KIND[action.kind];
   if (field) {
-    const newValue = String((action.payload ?? {})[field]);
+    const rawVal = (action.payload ?? {})[field];
+    const newValue: string | number | null =
+      action.kind === 'set_estimate'
+        ? (Number.isFinite(Number(rawVal)) ? Number(rawVal) : null)
+        : (rawVal == null || rawVal === '' ? null : String(rawVal));
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -287,12 +342,13 @@ async function executeApproved(state: S): Promise<Update> {
       if (cur.rows.length > 0) {
         const props = cur.rows[0].properties || {};
         const oldValue = props[field] != null ? String(props[field]) : null;
-        props[field] = newValue;
+        if (newValue == null) delete props[field];
+        else props[field] = newValue;
         await client.query(
           `UPDATE documents SET properties = $1, updated_at = now() WHERE id = $2 AND workspace_id = $3`,
           [JSON.stringify(props), action.entityId, state.workspaceId],
         );
-        await logDocumentChange(action.entityId, field, oldValue, newValue, actor ?? '00000000-0000-0000-0000-000000000000', 'fleetgraph', client);
+        await logDocumentChange(action.entityId, field, oldValue, newValue == null ? null : String(newValue), actor ?? '00000000-0000-0000-0000-000000000000', 'fleetgraph', client);
       }
       await client.query('COMMIT');
     } catch (err) {
@@ -308,25 +364,27 @@ async function executeApproved(state: S): Promise<Update> {
     }
   }
 
-  await recordFinding(state.workspaceId, finding, state.runId, 'acted');
+  if (finding) await recordFinding(state.workspaceId, finding, state.runId, 'acted');
   await resolvePendingApproval(state.runId, 'approved');
-  for (const uid of finding.recipients) {
-    broadcastToUser(uid, 'fleetgraph:finding', { dedupKey: finding.dedupKey, title: `Applied: ${action.summary}`, detail: finding.detail, severity: finding.severity, entityId: finding.entityId, entityType: finding.entityType, resolved: true });
-    broadcastToUser(uid, 'accountability:updated', { issueId: finding.entityId });
+  const dedupKey = finding?.dedupKey ?? `chat:${state.runId}`;
+  const recipients = finding?.recipients?.length ? finding.recipients : (state.actorUserId ? [state.actorUserId] : []);
+  for (const uid of recipients) {
+    broadcastToUser(uid, 'fleetgraph:finding', { dedupKey, title: `Applied: ${action.summary}`, detail: finding?.detail ?? '', severity: finding?.severity ?? 'info', entityId: action.entityId, entityType: action.entityType, resolved: true });
+    broadcastToUser(uid, 'accountability:updated', { issueId: action.entityId });
   }
-  return { emitted: [finding.dedupKey] };
+  return { emitted: [dedupKey] };
 }
 
 async function recordDismiss(state: S): Promise<Update> {
-  const finding = pickHitlFinding(state)!;
-  await setFindingStatusByDedup(state.workspaceId, finding.dedupKey, 'dismissed');
+  const { finding } = pickHitlAction(state)!;
+  if (finding) await setFindingStatusByDedup(state.workspaceId, finding.dedupKey, 'dismissed');
   await resolvePendingApproval(state.runId, 'dismissed');
   return {};
 }
 
 async function recordSnooze(state: S): Promise<Update> {
-  const finding = pickHitlFinding(state)!;
-  await setFindingStatusByDedup(state.workspaceId, finding.dedupKey, 'snoozed', state.snoozeUntil);
+  const { finding } = pickHitlAction(state)!;
+  if (finding) await setFindingStatusByDedup(state.workspaceId, finding.dedupKey, 'snoozed', state.snoozeUntil);
   await resolvePendingApproval(state.runId, 'snoozed');
   return {};
 }
@@ -379,7 +437,12 @@ export function buildGraph() {
     answerNode: 'answerNode',
     detect: 'detect',
   });
-  g.addEdge('answerNode', 'respond');
+  // On-demand: if the chat proposed a write, route it through the SAME HITL gate; else just respond.
+  g.addConditionalEdges(
+    'answerNode',
+    (s: S) => (s.proposedActions.some((a) => a.autonomy === 'hitl') ? 'humanGate' : 'respond'),
+    { humanGate: 'humanGate', respond: 'respond' },
+  );
   g.addEdge('respond', END);
 
   g.addEdge('detect', 'dedup');

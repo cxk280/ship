@@ -25,6 +25,7 @@ export function FleetGraphDock() {
   const [panel, setPanel] = useState<'inbox' | 'chat' | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
+  const [pendingAction, setPendingAction] = useState<{ threadId: string; summary: string } | null>(null);
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { currentDocumentType, currentDocumentId, currentDocumentProjectId } = useCurrentDocument();
@@ -86,9 +87,31 @@ export function FleetGraphDock() {
 
   const chatMut = useMutation({
     mutationFn: (message: string) => chat(message, scope()),
-    onSuccess: (res) => setMessages((m) => [...m, { role: 'agent', text: res.answer }]),
+    onSuccess: (res) => {
+      setMessages((m) => [...m, { role: 'agent', text: res.answer }]);
+      setPendingAction(res.pendingApproval ?? null);
+    },
     onError: () => setMessages((m) => [...m, { role: 'agent', text: 'Sorry — I could not reach the reasoning model.' }]),
   });
+
+  // Resolve a chat-proposed action inline (reuses the same HITL resume endpoint).
+  const chatActResolving = useRef(false);
+  const resolveChatAction = async (decision: 'approve' | 'dismiss') => {
+    if (!pendingAction || chatActResolving.current) return;
+    chatActResolving.current = true;
+    const { threadId, summary } = pendingAction;
+    setPendingAction(null);
+    try {
+      await resumeApproval(threadId, decision);
+      setMessages((m) => [...m, { role: 'agent', text: decision === 'approve' ? `✅ Applied: ${summary}` : `Cancelled: ${summary}` }]);
+      if (decision === 'approve') showToast('FleetGraph applied the change', 'success');
+      refresh();
+    } catch {
+      setMessages((m) => [...m, { role: 'agent', text: 'Could not complete that action.' }]);
+    } finally {
+      chatActResolving.current = false;
+    }
+  };
 
   const send = () => {
     const text = input.trim();
@@ -191,6 +214,16 @@ export function FleetGraphDock() {
               </div>
             ))}
             {chatMut.isPending && <div className="text-left text-sm text-muted-foreground">FleetGraph is thinking…</div>}
+            {pendingAction && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/50 dark:bg-amber-950/30">
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">Proposed action — needs your OK</div>
+                <div className="text-sm text-foreground">{pendingAction.summary}</div>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => resolveChatAction('approve')} className="rounded bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90">Apply</button>
+                  <button onClick={() => resolveChatAction('dismiss')} className="rounded border border-border px-3 py-1 text-xs font-medium text-muted-foreground hover:bg-muted">Cancel</button>
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
           <div className="flex gap-2 border-t border-border p-3">

@@ -57,7 +57,13 @@ export interface FgChatScope {
   sprintId?: string;
 }
 
-export async function chat(message: string, scope: FgChatScope): Promise<{ answer: string; runId: string }> {
+export interface FgChatResult {
+  answer: string;
+  runId: string;
+  pendingApproval?: { threadId: string; summary: string };
+}
+
+export async function chat(message: string, scope: FgChatScope): Promise<FgChatResult> {
   const res = await apiPost('/api/fleetgraph/chat', { message, ...scope });
   if (!res.ok) throw new Error('FleetGraph chat failed');
   return res.json();

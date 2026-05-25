@@ -4,6 +4,7 @@ import { Command, isGraphInterrupt } from '@langchain/langgraph';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { buildGraph } from './graph.js';
 import { getCheckpointer } from './checkpointer.js';
+import { getPendingApproval } from './findings-store.js';
 import type { Scope, ApprovalDecision } from './types.js';
 
 let compiledPromise: ReturnType<typeof compile> | null = null;
@@ -60,14 +61,30 @@ export async function runOndemandChat(params: {
   userId: string;
   scope: Scope;
   message: string;
-}): Promise<{ answer: string; runId: string }> {
+}): Promise<{ answer: string; runId: string; pendingApproval?: { threadId: string; summary: string } }> {
   const graph = await getGraph();
   const runId = `chat:${randomUUID()}`;
-  const final = await graph.invoke(
-    { mode: 'ondemand', triggerKind: 'chat', workspaceId: params.workspaceId, actorUserId: params.userId, userMessage: params.message, runId, scope: params.scope },
-    cfg(runId, ['fleetgraph', 'ondemand', 'chat'], { workspaceId: params.workspaceId, userId: params.userId }),
-  );
-  return { answer: (final.answer as string) ?? 'No response.', runId };
+  const config = cfg(runId, ['fleetgraph', 'ondemand', 'chat'], { workspaceId: params.workspaceId, userId: params.userId });
+  let final: Record<string, unknown> | undefined;
+  try {
+    final = await graph.invoke(
+      { mode: 'ondemand', triggerKind: 'chat', workspaceId: params.workspaceId, actorUserId: params.userId, userMessage: params.message, runId, scope: params.scope },
+      config,
+    );
+  } catch (err) {
+    if (!isGraphInterrupt(err)) throw err; // interrupt = paused for approval (chat proposed an action)
+  }
+  let answer = (final?.answer as string) ?? '';
+  if (!answer) {
+    // The run paused at the HITL gate before returning; read the answer from the checkpoint.
+    const snap = await graph.getState(config);
+    answer = (snap?.values?.answer as string) ?? 'FleetGraph prepared an action for your approval.';
+  }
+  const pending = await getPendingApproval(runId);
+  if (pending && pending.status === 'pending') {
+    return { answer, runId, pendingApproval: { threadId: runId, summary: String(pending.summary ?? 'Proposed action') } };
+  }
+  return { answer: answer || 'No response.', runId };
 }
 
 /** Resume a paused HITL run with the human's decision. */
