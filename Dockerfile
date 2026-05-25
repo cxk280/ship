@@ -45,6 +45,10 @@ ENV PORT=3000
 ENV LOAD_SSM=false
 ENV WEB_DIST_DIR=/app/web/dist
 
-# Start the application (run migrations first to ensure schema exists)
+# Start the application. Migrations are NOT run here — they run as a release/pre-deploy
+# step (Railway `deploy.preDeployCommand` in railway.json) so a failed migration fails the
+# deploy and the previous healthy version keeps serving, instead of crash-looping the app.
+# NOTE: non-Railway targets (e.g. AWS Elastic Beanstalk) must run `node dist/db/migrate.js`
+# as their own pre-deploy/release step, since it no longer runs on container start.
 WORKDIR /app/api
-CMD ["sh", "-c", "node dist/db/migrate.js && node dist/index.js"]
+CMD ["node", "dist/index.js"]
