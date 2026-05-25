@@ -7,8 +7,12 @@
 //        → approve: executeApproved | dismiss: recordDismiss | snooze: recordSnooze → END
 import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { FleetGraphState, type FleetGraphStateType } from './state.js';
-import { fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins, type PersonRow } from './fetch.js';
-import { detectSignals } from './detectors.js';
+import {
+  fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
+  fetchWorkspaceMeta, fetchSprintProgress,
+  type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta,
+} from './fetch.js';
+import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
 import { loadKnownFindings, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval } from './findings-store.js';
 import { broadcastToUser } from '../collaboration/index.js';
@@ -50,6 +54,13 @@ async function nodeFetchTeam(state: S): Promise<Update> {
 async function nodeFetchProjects(state: S): Promise<Update> {
   return { raw: { projects: await fetchProjects(state.workspaceId) } };
 }
+async function nodeFetchMeta(state: S): Promise<Update> {
+  const [meta, sprintProgress] = await Promise.all([
+    fetchWorkspaceMeta(state.workspaceId),
+    fetchSprintProgress(state.workspaceId),
+  ]);
+  return { raw: { meta, sprintProgress } };
+}
 function merge(_state: S): Update {
   return {}; // fan-in join; the `raw` reducer already merged the four fetches
 }
@@ -58,7 +69,20 @@ function merge(_state: S): Update {
 function detect(state: S): Update {
   const issues = (state.raw.issues as IssueRow[]) ?? [];
   const admins = (state.raw.admins as string[]) ?? [];
-  const signals = detectSignals(issues, { fallbackRecipients: admins });
+  let signals = detectSignals(issues, { fallbackRecipients: admins });
+
+  // Cross-entity detectors (sprint slip, capacity) only on workspace-wide (cron/digest) runs —
+  // not on a single-issue mutation trigger.
+  const workspaceWide = !state.scope.entityIds || state.scope.entityIds.length === 0;
+  if (workspaceWide) {
+    const weeks = (state.raw.weeks as WeekRow[]) ?? [];
+    const team = (state.raw.team as PersonRow[]) ?? [];
+    const sprintProgress = (state.raw.sprintProgress as SprintProgress[]) ?? [];
+    const meta = (state.raw.meta as WorkspaceMeta) ?? { sprintStartDate: null, sprintDuration: 7 };
+    signals = signals
+      .concat(detectSprintSlip(weeks, sprintProgress, team, meta, { fallbackRecipients: admins }))
+      .concat(detectCapacity(team, issues, { fallbackRecipients: admins }));
+  }
   return { signals };
 }
 
@@ -102,17 +126,22 @@ async function triage(state: S): Promise<Update> {
 
 // ---------------------------------------------------------------- reason (tier 2)
 function templateFinding(sig: Signal): Finding {
+  const ev = sig.evidence as Record<string, number | null | undefined>;
   const titles: Record<string, string> = {
     stale_in_progress: `Stalled: ${sig.entityLabel}`,
     overdue: `Overdue: ${sig.entityLabel}`,
     unassigned: `Unassigned: ${sig.entityLabel}`,
     unestimated: `No estimate: ${sig.entityLabel}`,
+    sprint_slip: `At risk of slipping: ${sig.entityLabel}`,
+    capacity_overload: `Overloaded: ${sig.entityLabel}`,
   };
   const details: Record<string, string> = {
-    stale_in_progress: `${sig.entityLabel} has been in progress with no activity for ${(sig.evidence as { idleDays?: number }).idleDays} days.`,
-    overdue: `${sig.entityLabel} is past its due date (${(sig.evidence as { overdueDays?: number }).overdueDays} days) and still open.`,
+    stale_in_progress: `${sig.entityLabel} has been in progress with no activity for ${ev.idleDays} days.`,
+    overdue: `${sig.entityLabel} is past its due date (${ev.overdueDays} days) and still open.`,
     unassigned: `${sig.entityLabel} is open work with no assignee.`,
     unestimated: `${sig.entityLabel} is open work with no estimate.`,
+    sprint_slip: `${sig.entityLabel} is ${ev.elapsedPct}% through its window but only ${ev.progressPct}% done (${ev.done}/${ev.total})${ev.confidence != null ? `, confidence ${ev.confidence}%` : ''}. Likely to slip — consider cutting scope or resetting confidence.`,
+    capacity_overload: `${sig.entityLabel} has ${ev.load}h of open work assigned vs ${ev.capacity}h capacity (${ev.openCount} open issues).`,
   };
   return {
     dedupKey: sig.dedupKey,
@@ -244,8 +273,9 @@ async function executeApproved(state: S): Promise<Update> {
   const action = finding.proposedAction!;
   const actor = state.actorUserId; // the approver
 
-  if (action.kind === 'set_state' || action.kind === 'set_priority') {
-    const field = action.kind === 'set_state' ? 'state' : 'priority';
+  const FIELD_BY_KIND: Record<string, string> = { set_state: 'state', set_priority: 'priority', reassign: 'assignee_id' };
+  const field = FIELD_BY_KIND[action.kind];
+  if (field) {
     const newValue = String((action.payload ?? {})[field]);
     const client = await pool.connect();
     try {
@@ -256,7 +286,7 @@ async function executeApproved(state: S): Promise<Update> {
       );
       if (cur.rows.length > 0) {
         const props = cur.rows[0].properties || {};
-        const oldValue = props[field] ?? null;
+        const oldValue = props[field] != null ? String(props[field]) : null;
         props[field] = newValue;
         await client.query(
           `UPDATE documents SET properties = $1, updated_at = now() WHERE id = $2 AND workspace_id = $3`,
@@ -270,6 +300,11 @@ async function executeApproved(state: S): Promise<Update> {
       throw err;
     } finally {
       client.release();
+    }
+    // Notify the new assignee on reassignment.
+    if (action.kind === 'reassign') {
+      const newAssignee = String((action.payload ?? {}).assignee_id ?? '');
+      if (newAssignee) broadcastToUser(newAssignee, 'accountability:updated', { issueId: action.entityId });
     }
   }
 
@@ -306,6 +341,7 @@ export function buildGraph() {
     .addNode('fetchWeeks', nodeFetchWeeks)
     .addNode('fetchTeam', nodeFetchTeam)
     .addNode('fetchProjects', nodeFetchProjects)
+    .addNode('fetchMeta', nodeFetchMeta)
     .addNode('merge', merge)
     .addNode('answerNode', answer)
     .addNode('respond', respond)
@@ -332,10 +368,12 @@ export function buildGraph() {
   g.addEdge('dispatch', 'fetchWeeks');
   g.addEdge('dispatch', 'fetchTeam');
   g.addEdge('dispatch', 'fetchProjects');
+  g.addEdge('dispatch', 'fetchMeta');
   g.addEdge('fetchIssues', 'merge');
   g.addEdge('fetchWeeks', 'merge');
   g.addEdge('fetchTeam', 'merge');
   g.addEdge('fetchProjects', 'merge');
+  g.addEdge('fetchMeta', 'merge');
 
   g.addConditionalEdges('merge', (s: S) => (s.mode === 'ondemand' ? 'answerNode' : 'detect'), {
     answerNode: 'answerNode',

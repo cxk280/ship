@@ -164,3 +164,39 @@ export async function fetchWorkspaceAdmins(workspaceId: string): Promise<string[
   );
   return result.rows.map((r) => r.user_id);
 }
+
+export interface WorkspaceMeta {
+  sprintStartDate: string | null; // ISO date (YYYY-MM-DD)
+  sprintDuration: number; // days
+}
+
+export async function fetchWorkspaceMeta(workspaceId: string): Promise<WorkspaceMeta> {
+  const r = await pool.query(`SELECT sprint_start_date FROM workspaces WHERE id = $1`, [workspaceId]);
+  const raw = r.rows[0]?.sprint_start_date ?? null;
+  let iso: string | null = null;
+  if (raw instanceof Date) iso = raw.toISOString().slice(0, 10);
+  else if (typeof raw === 'string') iso = raw.slice(0, 10);
+  return { sprintStartDate: iso, sprintDuration: 7 };
+}
+
+export interface SprintProgress {
+  sprintId: string;
+  total: number;
+  done: number;
+}
+
+/** Per-sprint issue counts (incl. done) for slip detection. */
+export async function fetchSprintProgress(workspaceId: string): Promise<SprintProgress[]> {
+  const r = await pool.query(
+    `SELECT sa.related_id AS sprint_id,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE i.properties->>'state' = 'done')::int AS done
+     FROM documents i
+     JOIN document_associations sa ON sa.document_id = i.id AND sa.relationship_type = 'sprint'
+     JOIN documents s ON s.id = sa.related_id AND s.document_type = 'sprint' AND s.workspace_id = $1
+     WHERE i.document_type = 'issue' AND i.deleted_at IS NULL AND i.archived_at IS NULL
+     GROUP BY sa.related_id`,
+    [workspaceId],
+  );
+  return r.rows.map((x) => ({ sprintId: x.sprint_id, total: x.total, done: x.done }));
+}
