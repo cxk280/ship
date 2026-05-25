@@ -74,16 +74,21 @@ flowchart TD
   D --> FW[fetchWeeks]
   D --> FT[fetchTeam]
   D --> FP[fetchProjects]
+  D --> FM[fetchMeta<br/>sprint window + progress]
   FI --> M[(merge · raw shallow-merge)]
   FW --> M
   FT --> M
   FP --> M
+  FM --> M
 
-  M -->|ondemand| AN[answerNode · Tier2]
-  M -->|proactive| DET[detectSignals · rules]
-  AN --> RSP[respond] --> E0([END · chat answer])
+  M -->|triggerKind = digest| DG[digest · Tier2 per-project synthesis]
+  M -->|ondemand| AN[answerNode · Tier2 · may propose an action]
+  M -->|proactive| DET[detectSignals + sprintSlip + capacity]
+  DG --> SA
+  AN -->|read-only| RSP[respond] --> E0([END · chat answer])
+  AN -->|proposes write| HG
 
-  DET --> DD[dedupFilter]
+  DET --> DD[dedupFilter<br/>+ adaptive suppression by dismissals]
   DD -->|novel = 0| E1([END · quiet · no LLM])
   DD -->|novel > 0| TR[triage · Tier1]
   TR -->|kept = 0| E2([END · stay quiet])
@@ -96,6 +101,9 @@ flowchart TD
   HG -->|dismiss| RDis[recordDismiss · suppress] --> E5([END])
   HG -->|snooze| RSnz[recordSnooze · snooze_until] --> E6([END])
 ```
+
+> Evals: `pnpm fleetgraph:eval` scores the deterministic detectors against labeled cases
+> (precision / recall / quiet-accuracy) — currently 10/10 exact. See `api/src/fleetgraph/evals/`.
 
 ### Node types
 - **Context:** `prepare` (load dedup baseline + admins), `resolveContext` (on-demand scope expansion).
@@ -143,7 +151,11 @@ flowchart TD
 | 3 | PM | Proactive: open work with no estimate | "No estimate: #X" flag, notify assignee | Add an estimate | Autonomous |
 | 4 | Engineer / PM | Proactive: `due_date < today`, still open | "Overdue: #X (N days)" + proposes raising to Urgent | Approve priority bump / re-date / dismiss | HITL |
 | 5 | Any | On-demand: chat from an issue / week / project | Grounded answer ("What's at risk?", "Who's overloaded?", "Is this week on track?") + suggested next action | Whether to act on the suggestion | On-demand read |
-| 6 | Director / Manager | *(planned)* Proactive: sprint `confidence` high but progress low; `Σ estimate > capacity_hours` | Confidence/progress mismatch; capacity overload → escalate to `reports_to` | Rebalance / adjust confidence | HITL |
+| 6 | Director / PM | Proactive (cron): active sprint where elapsed-fraction outpaces done-fraction (worse if confidence high) | "At risk of slipping: Week N — 71% elapsed, 20% done" finding to the sprint owner | Cut scope / reset confidence | Autonomous |
+| 7 | Manager | Proactive (cron): `Σ estimate` of a person's open work > `capacity_hours` | "Overloaded: Dana (34h vs 20h)" + proposes reassigning the lowest-priority item to the teammate with the most slack; notifies `reports_to` | Approve the reassignment / dismiss | HITL |
+| 8 | Any | On-demand: chat requests a change ("reassign #142 to Dana", "bump #88 to urgent") | Proposes a concrete action with validated ids; surfaces an inline Apply/Cancel | Apply or cancel | On-demand action (HITL) |
+| 9 | Director / PM | Proactive (daily cron): per project | Daily digest — "what's moving, what's at risk, the single most important next action" | Read; act on the called-out next step | Autonomous (digest) |
+| 10 | Team | Repeatedly dismissing a finding type | Agent learns to suppress that type after N dismissals (adaptive) | Nothing — the noise stops | (suppression at dedup) |
 
 ---
 
