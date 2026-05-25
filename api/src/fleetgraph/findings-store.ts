@@ -26,6 +26,18 @@ export async function loadKnownFindings(
   }));
 }
 
+/** How many distinct findings of each type the workspace has dismissed (for adaptive suppression). */
+export async function loadDismissalCounts(workspaceId: string): Promise<Record<string, number>> {
+  const r = await pool.query(
+    `SELECT finding_type, COUNT(*)::int AS n FROM fleetgraph_findings
+     WHERE workspace_id = $1 AND status = 'dismissed' GROUP BY finding_type`,
+    [workspaceId],
+  );
+  const out: Record<string, number> = {};
+  for (const row of r.rows) out[row.finding_type] = row.n;
+  return out;
+}
+
 /** Upsert a finding row. Opens (or re-opens) the finding and refreshes its evidence hash. */
 export async function recordFinding(
   workspaceId: string,

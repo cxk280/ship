@@ -14,7 +14,7 @@ import {
 } from './fetch.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
-import { loadKnownFindings, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval } from './findings-store.js';
+import { loadKnownFindings, loadDismissalCounts, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval } from './findings-store.js';
 import { broadcastToUser } from '../collaboration/index.js';
 import { pool } from '../db/client.js';
 import { logDocumentChange } from '../utils/document-crud.js';
@@ -25,9 +25,12 @@ type Update = Partial<S>;
 
 // ---------------------------------------------------------------- context
 async function prepare(state: S): Promise<Update> {
-  const admins = await fetchWorkspaceAdmins(state.workspaceId);
-  const known = await loadKnownFindings(state.workspaceId, state.scope.entityIds);
-  return { knownFindings: known, raw: { admins } };
+  const [admins, known, dismissals] = await Promise.all([
+    fetchWorkspaceAdmins(state.workspaceId),
+    loadKnownFindings(state.workspaceId, state.scope.entityIds),
+    loadDismissalCounts(state.workspaceId),
+  ]);
+  return { knownFindings: known, raw: { admins, dismissals } };
 }
 
 async function resolveContext(state: S): Promise<Update> {
@@ -88,8 +91,12 @@ function detect(state: S): Update {
 
 function dedup(state: S): Update {
   const known = new Map(state.knownFindings.map((k) => [k.dedupKey, k]));
+  const dismissals = (state.raw.dismissals as Record<string, number>) ?? {};
+  const suppressThreshold = Number(process.env.FLEETGRAPH_DISMISS_SUPPRESS_THRESHOLD ?? 3);
   const now = Date.now();
   const novel = state.signals.filter((sig) => {
+    // Adaptive suppression: if a finding type has been dismissed enough times, stop surfacing it.
+    if ((dismissals[sig.type] ?? 0) >= suppressThreshold) return false;
     const prior = known.get(sig.dedupKey);
     if (!prior) return true;                                   // never seen
     if (prior.status === 'dismissed') return false;            // permanently suppressed
