@@ -113,21 +113,23 @@ function dedup(state: S): Update {
 // ---------------------------------------------------------------- triage (tier 1)
 async function triage(state: S): Promise<Update> {
   const signals = state.novelSignals;
-  if (!isLlmAvailable()) {
-    // Deterministic fallback: surface everything except pure low-severity noise singletons.
-    return { keptSignals: signals };
-  }
-  const sys = `You are FleetGraph's triage step for a project-management tool. Given candidate signals about issues, decide which are worth a human's attention RIGHT NOW. Drop noise. Respond ONLY with JSON: {"keep":["<dedupKey>", ...]}.`;
-  const user = `Signals:\n${JSON.stringify(
-    signals.map((s) => ({ dedupKey: s.dedupKey, type: s.type, severity: s.severity, label: s.entityLabel, evidence: s.evidence })),
-    null, 2,
-  )}`;
+  if (signals.length === 0) return { keptSignals: [] };
+  if (!isLlmAvailable()) return { keptSignals: signals };
+  // Triage by 1-based INDEX, not dedupKey: the keys carry UUIDs the Tier-1 model can't echo back
+  // reliably, which made the returned "keep" list never match → every signal dropped (kept=0).
+  // Fail OPEN — triage is a light noise filter, not a gate; if the response is empty/unusable,
+  // surface everything (dedup + adaptive suppression handle repeat noise downstream).
+  const sys = `You are FleetGraph's triage step for a project-management tool. Given a numbered list of candidate signals about issues, list the INDICES worth a human's attention now; drop only true noise. Respond ONLY with JSON: {"keep":[<index>, ...]}. When in doubt, keep it.`;
+  const user = `Signals:\n${signals.map((s, i) => `${i + 1}. [${s.severity}] ${s.type} — ${s.entityLabel}: ${JSON.stringify(s.evidence)}`).join('\n')}`;
   const res = await invokeTier(1, sys, user);
   if (!res) return { keptSignals: signals };
-  const parsed = extractJson<{ keep: string[] }>(res.text);
-  const keepSet = new Set(parsed?.keep ?? signals.map((s) => s.dedupKey));
+  const parsed = extractJson<{ keep: Array<number | string> }>(res.text);
+  const idxs = (parsed?.keep ?? [])
+    .map((n) => Number(n) - 1)
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < signals.length);
+  const kept = idxs.length ? signals.filter((_, i) => idxs.includes(i)) : signals; // fail open
   return {
-    keptSignals: signals.filter((s) => keepSet.has(s.dedupKey)),
+    keptSignals: kept,
     cost: { tier1Tokens: res.inputTokens + res.outputTokens, tier2Tokens: 0, usd: res.usd },
   };
 }
