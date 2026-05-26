@@ -1,0 +1,115 @@
+version: 2.1
+
+# CI + CD for Ship (the FleetGraph agent runs in-process inside the Ship API, so the single
+# Railway deploy ships both the app and the agent).
+# Secrets come from the CircleCI "fleetgraph" context:
+#   ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2, LANGCHAIN_PROJECT, RAILWAY_TOKEN
+
+commands:
+  setup_node:
+    steps:
+      - checkout
+      - run:
+          name: Enable pnpm
+          command: corepack enable && corepack prepare pnpm@10.27.0 --activate
+      - restore_cache:
+          keys:
+            - pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+      - run:
+          name: Install dependencies
+          command: pnpm install --frozen-lockfile
+      - save_cache:
+          key: pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.local/share/pnpm/store
+      - run:
+          name: Build shared types (needed by api at runtime via @ship/shared)
+          command: pnpm build:shared
+
+jobs:
+  install_build:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - setup_node
+      - run:
+          name: Type-check
+          command: pnpm type-check
+      - run:
+          name: Build (shared + api + web — catches deploy-breaking build errors)
+          command: pnpm build
+
+  eval_deterministic:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - setup_node
+      - run:
+          name: Layer 1 — detector + dedup/suppression evals
+          command: pnpm --filter @ship/api fleetgraph:eval
+
+  test_integration:
+    docker:
+      - image: cimg/node:20.18
+        environment:
+          NODE_ENV: test
+          FLEETGRAPH_DISABLE_LLM: "1"
+          DATABASE_URL: postgresql://postgres@localhost:5432/ship_test
+      - image: cimg/postgres:16.4
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: ship_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+    steps:
+      - setup_node
+      - run:
+          name: Wait for Postgres
+          command: for i in $(seq 1 30); do nc -z localhost 5432 && exit 0; sleep 1; done; echo "postgres not ready"; exit 1
+      - run:
+          name: Run migrations (replay-safe)
+          command: pnpm --filter @ship/api db:migrate
+      - run:
+          name: Layer 2 — graph-path + HITL integration tests (+ existing suite)
+          command: pnpm --filter @ship/api test
+
+  eval_llm:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - setup_node
+      - run:
+          name: Layers 3+4 — LLM-graded + adversarial evals (LangSmith)
+          command: pnpm --filter @ship/api fleetgraph:eval:llm
+
+  deploy:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+      - run:
+          name: Install Railway CLI
+          command: npm i -g @railway/cli
+      - run:
+          name: Deploy app + agent to Railway
+          command: railway up --service shipshape-app --ci
+
+workflows:
+  build-test-deploy:
+    jobs:
+      - install_build:
+          context: fleetgraph
+      - eval_deterministic:
+          context: fleetgraph
+          requires: [install_build]
+      - test_integration:
+          context: fleetgraph
+          requires: [install_build]
+      - eval_llm:
+          context: fleetgraph
+          requires: [install_build]
+      - deploy:
+          context: fleetgraph
+          requires: [install_build, eval_deterministic, test_integration, eval_llm]
+          filters:
+            branches:
+              only: master

@@ -51,6 +51,7 @@ export function getTier2(): BaseChatModel | null {
   return tier2;
 }
 export function isLlmAvailable(): boolean {
+  if (process.env.FLEETGRAPH_DISABLE_LLM === '1') return false; // hermetic tests / forced deterministic path
   return getTier2() !== null;
 }
 

@@ -19,7 +19,9 @@
     "db:orphan-check": "tsx src/db/scripts/orphan-diagnostic.ts",
     "openapi:generate": "tsx src/scripts/generate-openapi.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "fleetgraph:eval": "tsx src/fleetgraph/evals/run-evals.ts"
+    "fleetgraph:eval": "tsx src/fleetgraph/evals/run-evals.ts",
+    "fleetgraph:eval:llm": "tsx src/fleetgraph/evals/llm/run-llm-evals.ts",
+    "fleetgraph:eval:all": "pnpm fleetgraph:eval && pnpm fleetgraph:eval:llm"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "7",

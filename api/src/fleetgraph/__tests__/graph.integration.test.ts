@@ -1,0 +1,124 @@
+// Layer 2 — graph-path + HITL integration tests against a real (truncated) DB.
+// Hermetic: FLEETGRAPH_DISABLE_LLM forces deterministic fallbacks (no tokens, repeatable).
+// Asserts each path's side effects and the autonomy boundary (no mutation before approval).
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { randomUUID } from 'crypto';
+import { pool } from '../../db/client.js';
+import { runProactiveForEntity, runDigest, resumeApproval } from '../runner.js';
+
+process.env.FLEETGRAPH_DISABLE_LLM = '1';
+
+let WS: string;
+let USER: string;
+let PERSON: string;
+let ticket = 9000;
+
+async function insertIssue(props: Record<string, unknown>, title = 'Test issue'): Promise<string> {
+  const r = await pool.query(
+    `INSERT INTO documents (workspace_id, document_type, title, ticket_number, properties, created_by, content, visibility)
+     VALUES ($1,'issue',$2,$3,$4,$5,'{}','workspace') RETURNING id`,
+    [WS, title, ticket++, JSON.stringify(props), USER],
+  );
+  return r.rows[0].id;
+}
+const findingsFor = async (entityId: string, status = 'open') =>
+  (await pool.query(`SELECT finding_type FROM fleetgraph_findings WHERE entity_id=$1 AND status=$2`, [entityId, status])).rows.map((x) => x.finding_type);
+const issueProps = async (id: string) => (await pool.query(`SELECT properties FROM documents WHERE id=$1`, [id])).rows[0]?.properties ?? {};
+const pendingFor = async (entityId: string) =>
+  (await pool.query(`SELECT thread_id, status, proposed_action FROM fleetgraph_pending_approvals WHERE entity_id=$1 ORDER BY created_at DESC LIMIT 1`, [entityId])).rows[0];
+
+describe('FleetGraph graph integration', () => {
+  beforeAll(async () => {
+    WS = (await pool.query(`INSERT INTO workspaces (name) VALUES ('FG Test WS') RETURNING id`)).rows[0].id;
+    USER = (await pool.query(`INSERT INTO users (email, password_hash, name) VALUES ($1,'h','Tester') RETURNING id`, [`fg-${randomUUID()}@t.local`])).rows[0].id;
+    await pool.query(`INSERT INTO workspace_memberships (workspace_id, user_id, role) VALUES ($1,$2,'admin')`, [WS, USER]);
+    PERSON = (await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, properties, visibility)
+       VALUES ($1,'person','Tester',$2,'workspace') RETURNING id`,
+      [WS, JSON.stringify({ user_id: USER, capacity_hours: 20 })],
+    )).rows[0].id;
+  });
+
+  beforeEach(async () => {
+    await pool.query(`DELETE FROM fleetgraph_pending_approvals WHERE workspace_id=$1`, [WS]);
+    await pool.query(`DELETE FROM fleetgraph_findings WHERE workspace_id=$1`, [WS]);
+    await pool.query(`DELETE FROM document_associations WHERE document_id IN (SELECT id FROM documents WHERE workspace_id=$1 AND document_type IN ('issue','project'))`, [WS]);
+    await pool.query(`DELETE FROM documents WHERE workspace_id=$1 AND document_type IN ('issue','project')`, [WS]);
+  });
+
+  it('quiet path: a healthy issue produces no finding', async () => {
+    const id = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, source: 'internal' });
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+    expect(await findingsFor(id)).toEqual([]);
+  });
+
+  it('autonomous path: unassigned + unestimated surfaces open findings', async () => {
+    const id = await insertIssue({ state: 'todo', priority: 'none', source: 'internal' }); // no assignee, no estimate
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+    const found = (await findingsFor(id)).sort();
+    expect(found).toContain('unassigned');
+    expect(found).toContain('unestimated');
+    // autonomous findings have no pending approval
+    expect(await pendingFor(id)).toBeUndefined();
+  });
+
+  it('HITL approve: overdue → pending approval, no mutation until approved, then PATCH + audit', async () => {
+    const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const id = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, due_date: past, source: 'internal' });
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+
+    const pending = await pendingFor(id);
+    expect(pending).toBeDefined();
+    expect(pending.status).toBe('pending');
+    // AUTONOMY BOUNDARY: nothing mutated before approval
+    expect((await issueProps(id)).priority).toBe('medium');
+
+    await resumeApproval({ threadId: pending.thread_id, decision: 'approve', userId: USER });
+    expect((await issueProps(id)).priority).toBe('urgent');
+    expect((await issueProps(id)).state).toBe('todo'); // ONLY priority changed (boundary)
+
+    const audit = (await pool.query(`SELECT field, new_value, automated_by FROM document_history WHERE document_id=$1 AND automated_by='fleetgraph'`, [id])).rows;
+    expect(audit).toEqual([{ field: 'priority', new_value: 'urgent', automated_by: 'fleetgraph' }]);
+    expect((await pendingFor(id)).status).toBe('approved');
+  });
+
+  it('HITL dismiss: no mutation, finding suppressed', async () => {
+    const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const id = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, due_date: past, source: 'internal' });
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+    const pending = await pendingFor(id);
+    await resumeApproval({ threadId: pending.thread_id, decision: 'dismiss', userId: USER });
+    expect((await issueProps(id)).priority).toBe('medium'); // unchanged
+    const dismissed = (await pool.query(`SELECT status FROM fleetgraph_findings WHERE entity_id=$1`, [id])).rows[0]?.status;
+    expect(dismissed).toBe('dismissed');
+  });
+
+  it('HITL snooze: no mutation, snooze_until set', async () => {
+    const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const id = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, due_date: past, source: 'internal' });
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+    const pending = await pendingFor(id);
+    await resumeApproval({ threadId: pending.thread_id, decision: 'snooze', snoozeUntil: new Date(Date.now() + 7 * 86400000).toISOString(), userId: USER });
+    expect((await issueProps(id)).priority).toBe('medium');
+    const row = (await pool.query(`SELECT status, snooze_until FROM fleetgraph_findings WHERE entity_id=$1`, [id])).rows[0];
+    expect(row.status).toBe('snoozed');
+    expect(row.snooze_until).not.toBeNull();
+  });
+
+  it('digest path: one finding per project, deduped per day', async () => {
+    const proj = (await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, properties, visibility)
+       VALUES ($1,'project','Test Project',$2,'workspace') RETURNING id`,
+      [WS, JSON.stringify({ owner_id: PERSON })],
+    )).rows[0].id;
+    const issue = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, source: 'internal' });
+    await pool.query(`INSERT INTO document_associations (document_id, related_id, relationship_type) VALUES ($1,$2,'project')`, [issue, proj]);
+
+    await runDigest(WS);
+    const c1 = (await pool.query(`SELECT count(*)::int n FROM fleetgraph_findings WHERE workspace_id=$1 AND finding_type='digest'`, [WS])).rows[0].n;
+    expect(c1).toBe(1);
+    await runDigest(WS); // same day → dedup, no new digest
+    const c2 = (await pool.query(`SELECT count(*)::int n FROM fleetgraph_findings WHERE workspace_id=$1 AND finding_type='digest'`, [WS])).rows[0].n;
+    expect(c2).toBe(1);
+  });
+});

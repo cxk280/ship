@@ -13,6 +13,8 @@ export interface EvalCase {
   weeks?: WeekRow[];
   progress?: SprintProgress[];
   meta?: WorkspaceMeta;
+  expectSeverities?: Record<string, string>; // assert a produced signal's severity, e.g. {overdue:'high'}
+  expectRecipientsContain?: string[]; // assert these user ids appear among produced recipients
 }
 
 const NOW = new Date('2026-03-15T12:00:00Z');
@@ -68,4 +70,36 @@ export const CASES: EvalCase[] = [
     progress: [{ sprintId: 's2', total: 10, done: 6 }],
     meta: { sprintStartDate: date(-(4 * 7 + 3)), sprintDuration: 7 }, // ~43% elapsed, 60% done
     issues: [] },
+
+  // --- severity + recipient resolution ---
+  { name: 'stale high severity (idle >= 2x threshold)', expect: ['stale_in_progress'], now: NOW,
+    expectSeverities: { stale_in_progress: 'high' },
+    issues: [issue({ state: 'in_progress', startedAt: iso(-12), lastActivityAt: iso(-8) })] },
+  { name: 'overdue is high + notifies assignee', expect: ['overdue'], now: NOW,
+    expectSeverities: { overdue: 'high' }, expectRecipientsContain: ['u1'],
+    issues: [issue({ assigneeId: 'u1', dueDate: date(-2) })] },
+  { name: 'unassigned in-progress is medium', expect: ['unassigned'], now: NOW,
+    expectSeverities: { unassigned: 'medium' },
+    issues: [issue({ state: 'in_progress', assigneeId: null, assigneeName: null, lastActivityAt: iso(0) })] },
+  { name: 'capacity overload is high + notifies person & reports_to', expect: ['capacity_overload'], now: NOW,
+    expectSeverities: { capacity_overload: 'high' }, expectRecipientsContain: ['u1', 'mgr'],
+    team: [person({ personId: 'p1', userId: 'u1', name: 'Dana', capacityHours: 10, reportsTo: 'mgr' }),
+           person({ personId: 'p2', userId: 'u2', name: 'Sam', capacityHours: 40 })],
+    issues: [issue({ assigneeId: 'u1', estimate: 10, state: 'todo' }),
+             issue({ assigneeId: 'u1', estimate: 8, state: 'in_progress', lastActivityAt: iso(0) })] },
+  { name: 'sprint slip notifies owner', expect: ['sprint_slip'], now: NOW,
+    expectRecipientsContain: ['u1'],
+    team: [person({ personId: 'p1', userId: 'u1', name: 'Dana' })],
+    weeks: [{ id: 's3', title: 'Week 5', sprintNumber: 5, status: 'active', ownerId: 'p1', confidence: 50 }],
+    progress: [{ sprintId: 's3', total: 8, done: 1 }],
+    meta: { sprintStartDate: date(-(4 * 7 + 5)), sprintDuration: 7 },
+    issues: [] },
+  { name: 'planning sprint not yet active (quiet)', expect: [], now: NOW,
+    team: [person({ personId: 'p1', userId: 'u1', name: 'Dana' })],
+    weeks: [{ id: 's4', title: 'Week 5', sprintNumber: 5, status: 'planning', ownerId: 'p1', confidence: 90 }],
+    progress: [{ sprintId: 's4', total: 10, done: 0 }],
+    meta: { sprintStartDate: date(-(4 * 7 + 5)), sprintDuration: 7 },
+    issues: [] },
+  { name: 'overdue but cancelled (quiet)', expect: [], now: NOW,
+    issues: [issue({ state: 'cancelled', dueDate: date(-5) })] },
 ];

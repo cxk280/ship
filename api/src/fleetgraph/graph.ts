@@ -15,10 +15,11 @@ import {
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
 import { loadKnownFindings, loadDismissalCounts, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval } from './findings-store.js';
+import { filterNovel } from './dedup.js';
 import { broadcastToUser } from '../collaboration/index.js';
 import { pool } from '../db/client.js';
 import { logDocumentChange } from '../utils/document-crud.js';
-import type { IssueRow, Signal, Finding, ProposedAction } from './types.js';
+import type { IssueRow, Signal, Finding, ProposedAction, Scope } from './types.js';
 
 type S = FleetGraphStateType;
 type Update = Partial<S>;
@@ -90,23 +91,8 @@ function detect(state: S): Update {
 }
 
 function dedup(state: S): Update {
-  const known = new Map(state.knownFindings.map((k) => [k.dedupKey, k]));
   const dismissals = (state.raw.dismissals as Record<string, number>) ?? {};
-  const suppressThreshold = Number(process.env.FLEETGRAPH_DISMISS_SUPPRESS_THRESHOLD ?? 3);
-  const now = Date.now();
-  const novel = state.signals.filter((sig) => {
-    // Adaptive suppression: if a finding type has been dismissed enough times, stop surfacing it.
-    if ((dismissals[sig.type] ?? 0) >= suppressThreshold) return false;
-    const prior = known.get(sig.dedupKey);
-    if (!prior) return true;                                   // never seen
-    if (prior.status === 'dismissed') return false;            // permanently suppressed
-    if (prior.status === 'snoozed') {
-      return prior.snoozeUntil ? new Date(prior.snoozeUntil).getTime() < now : false;
-    }
-    // open/acted: re-surface only if the situation materially changed
-    return prior.contentHash !== sig.contentHash;
-  });
-  return { novelSignals: novel };
+  return { novelSignals: filterNovel(state.signals, state.knownFindings, dismissals) };
 }
 
 // ---------------------------------------------------------------- triage (tier 1)
@@ -559,3 +545,15 @@ export function buildGraph() {
 
   return g;
 }
+
+// ---------------------------------------------------------------- eval wrappers
+// Thin, test-only entry points that exercise the real node logic with plain inputs.
+// (The nodes read only the fields each wrapper supplies, so the partial-state cast is safe.)
+export const evalTriage = (signals: Signal[]): Promise<Update> =>
+  triage({ novelSignals: signals } as S);
+
+export const evalReason = (signals: Signal[]): Promise<Update> =>
+  reason({ keptSignals: signals } as S);
+
+export const evalAnswer = (input: { scope: Scope; raw: Record<string, unknown>; userMessage: string }): Promise<Update> =>
+  answer({ scope: input.scope, raw: input.raw, userMessage: input.userMessage } as S);
