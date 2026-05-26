@@ -88,7 +88,7 @@ jobs:
       - checkout
       - run:
           name: Install Railway CLI
-          command: npm i -g @railway/cli
+          command: sudo npm i -g @railway/cli
       - run:
           name: Deploy app + agent to Railway
           command: railway up --service shipshape-app --ci
