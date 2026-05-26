@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
-import { listFindings, listPendingApprovals, getPendingApproval } from '../fleetgraph/findings-store.js';
+import { listFindings, listPendingApprovals, getPendingApproval, setFindingStatusById } from '../fleetgraph/findings-store.js';
 import { runOndemandChat, resumeApproval } from '../fleetgraph/runner.js';
 import type { Scope } from '../fleetgraph/types.js';
 
@@ -93,6 +93,35 @@ fleetgraphRouter.post('/approvals/:threadId/resume', authMiddleware, async (req:
     res.json({ success: true, decision: parsed.data.decision });
   } catch (err) {
     console.error('FleetGraph resume error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/fleetgraph/findings/:id/resolve — manually dismiss or snooze an autonomous finding.
+const findingResolveSchema = z.object({
+  decision: z.enum(['dismiss', 'snooze']),
+  snoozeDays: z.number().int().min(1).max(90).optional(),
+});
+fleetgraphRouter.post('/findings/:id/resolve', authMiddleware, async (req: Request, res: Response) => {
+  try {
+    const id = String(req.params.id);
+    const parsed = findingResolveSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid input', details: parsed.error.errors });
+      return;
+    }
+    const snoozeUntil = parsed.data.decision === 'snooze'
+      ? new Date(Date.now() + (parsed.data.snoozeDays ?? 7) * 86_400_000).toISOString()
+      : null;
+    await setFindingStatusById(
+      req.workspaceId!,
+      id,
+      parsed.data.decision === 'snooze' ? 'snoozed' : 'dismissed',
+      snoozeUntil,
+    );
+    res.json({ success: true, decision: parsed.data.decision });
+  } catch (err) {
+    console.error('FleetGraph finding resolve error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

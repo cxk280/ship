@@ -50,6 +50,12 @@ export async function resumeApproval(threadId: string, decision: Decision, snooz
   if (!res.ok) throw new Error('Failed to submit decision');
 }
 
+/** Manually dismiss or snooze an autonomous finding (one without a HITL approval). */
+export async function resolveFinding(id: string, decision: 'dismiss' | 'snooze', snoozeDays?: number): Promise<void> {
+  const res = await apiPost(`/api/fleetgraph/findings/${id}/resolve`, { decision, snoozeDays });
+  if (!res.ok) throw new Error('Failed to update finding');
+}
+
 export interface FgChatScope {
   documentId?: string;
   documentType?: string;

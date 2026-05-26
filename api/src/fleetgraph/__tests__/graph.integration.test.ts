@@ -64,6 +64,20 @@ describe('FleetGraph graph integration', () => {
     expect(await pendingFor(id)).toBeUndefined();
   });
 
+  it('auto-resolves an autonomous finding once its condition clears', async () => {
+    const id = await insertIssue({ state: 'todo', priority: 'medium', estimate: 3, source: 'internal' }); // unassigned (has estimate)
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+    expect(await findingsFor(id)).toContain('unassigned'); // open
+
+    // fix it — assign the issue; the next run should clear the finding
+    await pool.query(`UPDATE documents SET properties = jsonb_set(properties, '{assignee_id}', to_jsonb($2::text)) WHERE id=$1`, [id, USER]);
+    await runProactiveForEntity({ workspaceId: WS, entityId: id, entityType: 'issue' });
+
+    expect(await findingsFor(id)).not.toContain('unassigned'); // gone from the open inbox
+    const status = (await pool.query(`SELECT status FROM fleetgraph_findings WHERE entity_id=$1 AND finding_type='unassigned'`, [id])).rows[0]?.status;
+    expect(status).toBe('resolved');
+  });
+
   it('HITL approve: overdue → pending approval, no mutation until approved, then PATCH + audit', async () => {
     const past = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
     const id = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3, due_date: past, source: 'internal' });

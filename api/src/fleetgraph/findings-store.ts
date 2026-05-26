@@ -86,6 +86,44 @@ export async function setFindingStatusByDedup(
   );
 }
 
+/** Manual dismiss/snooze of a single finding from the inbox (by id). */
+export async function setFindingStatusById(
+  workspaceId: string,
+  findingId: string,
+  status: string,
+  snoozeUntil: string | null = null,
+): Promise<void> {
+  await pool.query(
+    `UPDATE fleetgraph_findings SET status = $3, snooze_until = $4, last_seen_at = now()
+     WHERE workspace_id = $1 AND id = $2`,
+    [workspaceId, findingId, status, snoozeUntil],
+  );
+}
+
+/** Auto-resolve: close open findings of the given (autonomous) types whose condition no longer
+ *  fires — i.e. the issue was assigned/estimated/closed. `entityIds` scopes it to the entities a
+ *  run actually examined (a single-issue mutation run must not touch other entities' findings);
+ *  pass null for a workspace-wide sweep. Returns the resolved rows so callers can notify. */
+export async function resolveClearedFindings(
+  workspaceId: string,
+  firingDedupKeys: string[],
+  entityIds: string[] | null,
+  types: string[],
+): Promise<Array<{ dedup_key: string; recipients: string[] | null; title: string; severity: string; entity_id: string | null; entity_type: string | null }>> {
+  const r = await pool.query(
+    `UPDATE fleetgraph_findings
+        SET status = 'resolved', last_seen_at = now()
+      WHERE workspace_id = $1
+        AND status = 'open'
+        AND finding_type = ANY($2::text[])
+        AND ($3::text[] IS NULL OR entity_id::text = ANY($3::text[]))
+        AND NOT (dedup_key = ANY($4::text[]))
+      RETURNING dedup_key, recipients, title, severity, entity_id, entity_type`,
+    [workspaceId, types, entityIds, firingDedupKeys],
+  );
+  return r.rows;
+}
+
 export async function listFindings(
   workspaceId: string,
   statuses: string[] = ['open'],
