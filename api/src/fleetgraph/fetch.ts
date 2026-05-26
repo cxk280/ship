@@ -16,6 +16,17 @@ export async function fetchIssues(workspaceId: string, scope: Scope): Promise<Is
     params.push(scope.sprintId);
     scopeClause += ` AND EXISTS (SELECT 1 FROM document_associations da
         WHERE da.document_id = i.id AND da.relationship_type = 'sprint' AND da.related_id = $2)`;
+  } else if (scope.projectId) {
+    params.push(scope.projectId);
+    scopeClause += ` AND EXISTS (SELECT 1 FROM document_associations da
+        WHERE da.document_id = i.id AND da.relationship_type = 'project' AND da.related_id = $2)`;
+  } else if (scope.programId) {
+    params.push(scope.programId);
+    scopeClause += ` AND EXISTS (SELECT 1 FROM document_associations da
+        WHERE da.document_id = i.id AND da.relationship_type = 'program' AND da.related_id = $2)`;
+  } else if (scope.assigneeId) {
+    params.push(scope.assigneeId);
+    scopeClause += ` AND (i.properties->>'assignee_id')::uuid = $2`;
   }
 
   const result = await pool.query(
@@ -93,6 +104,16 @@ export async function fetchTeam(workspaceId: string): Promise<PersonRow[]> {
       reportsTo: p.reports_to || null,
     };
   });
+}
+
+/** Resolve a person document's linked user id (issues are assigned by user id, not person-doc id). */
+export async function fetchPersonUserId(personDocId: string): Promise<string | null> {
+  const r = await pool.query(
+    `SELECT properties->>'user_id' AS user_id FROM documents
+     WHERE id = $1 AND document_type = 'person'`,
+    [personDocId],
+  );
+  return r.rows[0]?.user_id || null;
 }
 
 export interface WeekRow {

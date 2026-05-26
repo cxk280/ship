@@ -11,6 +11,9 @@ export interface Scope {
   documentType?: string;
   projectId?: string;
   sprintId?: string;
+  programId?: string;
+  /** Resolved user id when the current view is a person document (scopes issues to their work). */
+  assigneeId?: string;
   /** Entity ids the run should consider (mutation: one issue; cron: active-sprint issues). */
   entityIds?: string[];
   changedFields?: string[];
