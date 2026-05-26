@@ -25,9 +25,12 @@ and **on-demand** (context-aware chat scoped to the view you're looking at). Bot
 - **Unassigned** — open work (`todo`/`in_progress`/`in_review`) with no `assignee_id`.
 - **Unestimated** — open work with no `estimate`.
 
-**What it reasons about on demand.** Whatever the user is looking at. The embedded chat answers
-questions about the current issue / week / project ("What's at risk here?", "Who's overloaded?",
-"Is this week on track?") grounded in the same fetched state, and can suggest the next action.
+**What it reasons about on demand.** Whatever the user is looking at — an issue, sprint, project,
+program, or person — scoped to that document's work. The embedded chat answers questions ("What's at
+risk here?", "Who's overloaded?", "Is this week on track?") grounded in the fetched state, and can
+suggest the next action. Because **everything in Ship is a document**, it also answers
+workspace-landscape questions from a document census + index ("how many documents/issues are there?",
+"list the wikis", "what projects exist?", "who's on the team?").
 
 **What it can do autonomously (no approval).** Additive, reversible things only: record a finding,
 push an in-app notification, surface a flag in the inbox, write a `document_history` audit row, and
@@ -53,9 +56,11 @@ when nothing has materially changed.
 in-process it queries the same DB pool directly.
 
 **How on-demand mode uses the current view.** The chat reads `useCurrentDocument()` on the client
-and passes `{ documentId, documentType, projectId, sprintId }` to the graph. `resolveContext`
-expands that into the concrete entity set (an issue → that issue; a sprint → that sprint's issues),
-so a chat on an issue knows that issue and a chat on a week knows that week.
+and passes `{ documentId, documentType, projectId, sprintId }` to the graph. `resolveContext` expands
+that into the concrete entity set by document type — issue → that issue; sprint / project / program →
+that container's issues; person → that user's assigned work. A workspace-wide document **census**
+(counts by type) and **index** (title + type directory) are always fetched too, so the chat can answer
+landscape questions regardless of the current view.
 
 ---
 
@@ -102,13 +107,19 @@ flowchart TD
   HG -->|snooze| RSnz[recordSnooze · snooze_until] --> E6([END])
 ```
 
-> Evals: `pnpm fleetgraph:eval` scores the deterministic detectors against labeled cases
-> (precision / recall / quiet-accuracy) — currently 10/10 exact. See `api/src/fleetgraph/evals/`.
+> **Evals (4 layers, all gate CI):** `pnpm fleetgraph:eval` scores the deterministic detectors +
+> dedup/suppression (precision / recall / quiet-accuracy; 17 detector + 10 dedup cases).
+> `pnpm fleetgraph:eval:llm` runs the LLM-graded layers — triage, reasoning faithfulness, chat
+> groundedness, action-extraction, **adversarial/prompt-injection**, and a ~48-case **meta/landscape**
+> suite (document counts, distributions, ownership, naming/listing docs of any type). Layer 2
+> (graph-path + HITL integration) runs under vitest against a real DB. CircleCI runs all layers and
+> auto-deploys to Railway on a green `master`. See `api/src/fleetgraph/evals/`.
 
 ### Node types
 - **Context:** `prepare` (load dedup baseline + admins), `resolveContext` (on-demand scope expansion).
-- **Fetch (parallel, read-only):** `fetchIssues`, `fetchWeeks`, `fetchTeam`, `fetchProjects` → `merge`
-  (the `raw` channel shallow-merges the four, so fan-in is order-independent).
+- **Fetch (parallel, read-only):** `fetchIssues`, `fetchWeeks`, `fetchTeam`, `fetchProjects`,
+  `fetchMeta` (sprint window/progress + workspace document **census** & title/type **index**) → `merge`
+  (the `raw` channel shallow-merges the fetches, so fan-in is order-independent).
 - **Reasoning:** `detectSignals` (deterministic), `dedupFilter` (deterministic), `triage` (Tier-1 Haiku),
   `reason` (Tier-2 Opus), `answerNode` (Tier-2, on-demand).
 - **Action:** `classify` (auto vs HITL policy), `surfaceAuto` (persist + notify autonomous findings),
@@ -156,6 +167,7 @@ flowchart TD
 | 8 | Any | On-demand: chat requests a change ("reassign #142 to Dana", "bump #88 to urgent") | Proposes a concrete action with validated ids; surfaces an inline Apply/Cancel | Apply or cancel | On-demand action (HITL) |
 | 9 | Director / PM | Proactive (daily cron): per project | Daily digest — "what's moving, what's at risk, the single most important next action" | Read; act on the called-out next step | Autonomous (digest) |
 | 10 | Team | Repeatedly dismissing a finding type | Agent learns to suppress that type after N dismissals (adaptive) | Nothing — the noise stops | (suppression at dedup) |
+| 11 | Any | On-demand: chat asks about the workspace itself ("how many documents are there?", "list the wikis", "what projects exist?", "who's on the team?") | Grounded answer from the document census + index, across all document types (everything is a document) | — (informational) | On-demand read |
 
 ---
 
@@ -164,8 +176,8 @@ flowchart TD
 Defended choice: webhook-only misses "nothing happened" conditions; poll-only wastes runs and couples
 latency to the interval. Hybrid gets sub-minute latency on *changes* and bounded latency on *absences*.
 
-- **Real-time (mutation):** an in-process event fires from the issue `PATCH` post-commit hook
-  (`api/src/routes/issues.ts`), debounced ~15s (`FLEETGRAPH_DEBOUNCE_MS`) and run in the same process
+- **Real-time (mutation):** an in-process event fires from the issue **create and update** post-commit
+  hooks (`api/src/routes/issues.ts` `POST`/`PATCH`), debounced ~15s (`FLEETGRAPH_DEBOUNCE_MS`) and run in the same process
   (no broker). Fetch (narrow, parallel) ≈ 0.5–2s · triage ≈ 1–3s · reason ≈ 3–8s · notify ≈ instant
   → **well under the 5-minute detection SLA** (typically < 1 min).
 - **Scheduled (cron):** `node-cron` every 5 min (`FLEETGRAPH_CRON`) sweeps each workspace's open work
@@ -253,3 +265,6 @@ and `LANGCHAIN_TRACING_V2=true`.
   + advisory-locked cron are enough at this scale.
 - **Deterministic detectors before any LLM** — the biggest cost lever; reasoning only runs on novel,
   triage-surviving signals.
+- **CI/CD (CircleCI → Railway)** — every push runs type-check/build, the deterministic + LLM eval
+  layers, and the graph/HITL integration tests; a green `master` auto-deploys the app (with the
+  in-process agent) to Railway. Secrets come from the `ship` project's environment variables.
