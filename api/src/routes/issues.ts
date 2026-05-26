@@ -640,6 +640,20 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
 
     await client.query('COMMIT');
 
+    // FleetGraph: a brand-new issue can already be unassigned/unestimated/overdue — enqueue a
+    // proactive run so detection is sub-minute instead of waiting for the cron sweep (debounced,
+    // fire-and-forget). Mirrors the update handler.
+    try {
+      enqueueMutationRun({
+        workspaceId: workspaceId!,
+        entityId: newIssueId,
+        entityType: 'issue',
+        changedFields: ['created'],
+      });
+    } catch (e) {
+      console.error('[FleetGraph] enqueue failed:', e);
+    }
+
     // Auto-complete sprint_issues accountability when first issue is created in a sprint
     const sprintAssociations = belongs_to.filter(bt => bt.type === 'sprint');
     for (const sprintAssoc of sprintAssociations) {
