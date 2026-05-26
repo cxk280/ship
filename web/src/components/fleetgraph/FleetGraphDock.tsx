@@ -8,7 +8,7 @@ import { useCurrentDocument } from '@/contexts/CurrentDocumentContext';
 import { useRealtimeEvent } from '@/hooks/useRealtimeEvents';
 import { useToast } from '@/components/ui/Toast';
 import {
-  getInbox, resumeApproval, chat,
+  getInbox, resumeApproval, resolveFinding, chat,
   type FgChatScope, type Decision, type Severity,
 } from '@/lib/fleetgraph';
 
@@ -74,6 +74,17 @@ export function FleetGraphDock() {
       refresh();
     },
     onError: () => showToast('Could not submit decision', 'error'),
+  });
+
+  // Manual dismiss/snooze for autonomous findings (those without an approval card).
+  const findingMut = useMutation({
+    mutationFn: ({ id, decision }: { id: string; decision: 'dismiss' | 'snooze' }) =>
+      resolveFinding(id, decision, decision === 'snooze' ? 7 : undefined),
+    onSuccess: (_d, vars) => {
+      showToast(vars.decision === 'snooze' ? 'Snoozed for 7 days' : 'Dismissed', 'success');
+      refresh();
+    },
+    onError: () => showToast('Could not update finding', 'error'),
   });
 
   const scope = (): FgChatScope => {
@@ -183,6 +194,18 @@ export function FleetGraphDock() {
                     <div className="text-sm font-medium text-foreground">{f.title}</div>
                     <div className="text-xs text-muted-foreground">{f.detail}</div>
                   </div>
+                </div>
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    onClick={() => findingMut.mutate({ id: f.id, decision: 'snooze' })}
+                    disabled={findingMut.isPending}
+                    className="rounded border border-border px-2 py-0.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                  >Snooze 7d</button>
+                  <button
+                    onClick={() => findingMut.mutate({ id: f.id, decision: 'dismiss' })}
+                    disabled={findingMut.isPending}
+                    className="rounded border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  >Dismiss</button>
                 </div>
               </div>
             ))}

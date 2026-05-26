@@ -14,7 +14,7 @@ import {
 } from './fetch.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
-import { loadKnownFindings, loadDismissalCounts, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval } from './findings-store.js';
+import { loadKnownFindings, loadDismissalCounts, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval, resolveClearedFindings } from './findings-store.js';
 import { filterNovel } from './dedup.js';
 import { broadcastToUser } from '../collaboration/index.js';
 import { pool } from '../db/client.js';
@@ -85,7 +85,12 @@ function merge(_state: S): Update {
 }
 
 // ---------------------------------------------------------------- detection + dedup
-function detect(state: S): Update {
+// Autonomous (no HITL approval) finding types that should auto-clear once their condition stops
+// firing. HITL types (overdue, stale_in_progress, capacity_overload) clear via the approval card;
+// digest is date-keyed and expires on its own, so neither is auto-resolved here.
+const AUTO_RESOLVE_TYPES = ['unassigned', 'unestimated', 'sprint_slip'];
+
+async function detect(state: S): Promise<Update> {
   const issues = (state.raw.issues as IssueRow[]) ?? [];
   const admins = (state.raw.admins as string[]) ?? [];
   let signals = detectSignals(issues, { fallbackRecipients: admins });
@@ -101,6 +106,20 @@ function detect(state: S): Update {
     signals = signals
       .concat(detectSprintSlip(weeks, sprintProgress, team, meta, { fallbackRecipients: admins }))
       .concat(detectCapacity(team, issues, { fallbackRecipients: admins }));
+  }
+
+  // Auto-resolve autonomous findings whose condition cleared (issue assigned/estimated/closed), so
+  // fixing the problem makes its notification go away. Scoped to the entities this run examined.
+  try {
+    const entityIds = state.scope.entityIds && state.scope.entityIds.length ? state.scope.entityIds : null;
+    const cleared = await resolveClearedFindings(state.workspaceId, signals.map((s) => s.dedupKey), entityIds, AUTO_RESOLVE_TYPES);
+    for (const c of cleared) {
+      for (const uid of c.recipients ?? []) {
+        broadcastToUser(uid, 'fleetgraph:finding', { dedupKey: c.dedup_key, title: `Resolved: ${c.title}`, detail: '', severity: c.severity, entityId: c.entity_id, entityType: c.entity_type, resolved: true });
+      }
+    }
+  } catch (e) {
+    console.error('[FleetGraph] auto-resolve failed:', e);
   }
   return { signals };
 }
