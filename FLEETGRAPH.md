@@ -6,8 +6,10 @@ and **on-demand** (context-aware chat scoped to the view you're looking at). Bot
 **one LangGraph.js graph**; the only difference is the trigger.
 
 - **Framework:** LangGraph.js (`@langchain/langgraph`) running inside Ship's Express API (`api/src/fleetgraph/`).
-- **Model:** Claude via AWS Bedrock (`@langchain/aws` `ChatBedrockConverse`) — reuses Ship's existing
-  Bedrock posture (IAM instance role, no new key). Tiered: Haiku (triage) / Opus (reason, answer).
+- **Model:** Claude, tiered — Tier-1 Haiku (triage) + Tier-2 Sonnet/Opus (reason, answer). The
+  provider auto-switches at runtime (`llm.ts`): the **Anthropic API** (`claude-sonnet-4-6` /
+  `claude-haiku-4-5`) when `ANTHROPIC_API_KEY` is set — the prod/Railway path — otherwise **AWS
+  Bedrock** (Opus/Haiku), reusing Ship's IAM instance role with no new key (the EB path).
 - **Observability:** LangSmith tracing (auto via LangGraph when `LANGCHAIN_TRACING_V2=true`).
 - **Persistence:** Postgres-backed checkpointer (`@langchain/langgraph-checkpoint-postgres`) so
   interrupted human-in-the-loop runs survive deploys/scale-in; one `fleetgraph_findings` table is the
@@ -211,7 +213,8 @@ tier; the expensive tier only sees triage survivors. Rough per-run budget: quiet
 # DB (local Postgres) up, then:
 pnpm dev                 # starts api + web; FleetGraph triggers start with the API
 
-# Required env for live reasoning + tracing (Bedrock uses the IAM role, no key):
+# Required env for live reasoning + tracing:
+#   ANTHROPIC_API_KEY=sk-ant-...   # uses the Anthropic API; omit to fall back to AWS Bedrock (IAM role)
 #   LANGCHAIN_TRACING_V2=true
 #   LANGCHAIN_API_KEY=ls__...
 #   LANGCHAIN_PROJECT=fleetgraph
@@ -256,8 +259,9 @@ and `LANGCHAIN_TRACING_V2=true`.
 - **LangGraph.js over Python** — keeps the agent in Ship's TS monorepo; still LangGraph, so LangSmith
   tracing is automatic and the "LangGraph recommended" constraint is met. Reuses Ship's API, types,
   auth, WebSocket, and toast.
-- **Bedrock over the first-party Anthropic API** — reuses Ship's in-prod Bedrock integration; IAM
-  auth, no new secret. LangSmith still captures token usage.
+- **Runtime provider switch (Bedrock / Anthropic)** — on EB the agent reuses Ship's in-prod Bedrock
+  integration (IAM auth, no new secret); on Railway (no AWS creds) it uses the Anthropic API via
+  `ANTHROPIC_API_KEY`. Same code, chosen by env (`llm.ts`). LangSmith captures token usage either way.
 - **Postgres checkpointer over MemorySaver** — EB is multi-instance/ephemeral; in-memory state would
   lose interrupted HITL runs on deploy and break cross-instance resume.
 - **Hybrid trigger over poll-only/webhook-only** — see Trigger Model.
