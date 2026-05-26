@@ -92,8 +92,13 @@ export async function invokeTier(
 export function extractJson<T>(text: string): T | null {
   const match = text.match(/```json\s*([\s\S]*?)```/) || text.match(/\{[\s\S]*\}/) || text.match(/\[[\s\S]*\]/);
   if (!match) return null;
+  const raw = (match[1] || match[0])
+    // Models occasionally emit `"action": undefined` (invalid JSON) when told to omit a field.
+    .replace(/:(\s*)undefined(\s*[,}\]])/g, ':$1null$2')
+    // Tolerate trailing commas before a closing brace/bracket.
+    .replace(/,(\s*[}\]])/g, '$1');
   try {
-    return JSON.parse(match[1] || match[0]) as T;
+    return JSON.parse(raw) as T;
   } catch {
     return null;
   }

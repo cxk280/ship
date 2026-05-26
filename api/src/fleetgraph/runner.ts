@@ -17,8 +17,8 @@ function getGraph() {
   return compiledPromise;
 }
 
-function cfg(threadId: string, tags: string[], metadata: Record<string, unknown>): RunnableConfig {
-  return { configurable: { thread_id: threadId }, runName: `fleetgraph-${tags[tags.length - 1]}`, tags, metadata };
+function cfg(threadId: string, tags: string[], metadata: Record<string, unknown>, runName?: string): RunnableConfig {
+  return { configurable: { thread_id: threadId }, runName: runName ?? `fleetgraph-${tags[tags.length - 1]}`, tags, metadata };
 }
 
 /** Proactive run scoped to a single changed entity (mutation trigger). */
@@ -78,7 +78,14 @@ export async function runOndemandChat(params: {
 }): Promise<{ answer: string; runId: string; pendingApproval?: { threadId: string; summary: string } }> {
   const graph = await getGraph();
   const runId = `chat:${randomUUID()}`;
-  const config = cfg(runId, ['fleetgraph', 'ondemand', 'chat'], { workspaceId: params.workspaceId, userId: params.userId });
+  // Label the trace by the question (the runId/thread is opaque) and keep the question in metadata.
+  const preview = params.message.replace(/\s+/g, ' ').trim().slice(0, 80);
+  const config = cfg(
+    runId,
+    ['fleetgraph', 'ondemand', 'chat'],
+    { workspaceId: params.workspaceId, userId: params.userId, question: params.message },
+    `fleetgraph-chat: "${preview}"`,
+  );
   let final: Record<string, unknown> | undefined;
   try {
     final = await graph.invoke(

@@ -216,7 +216,15 @@ User: ${question}`;
   if (!res) return { answer: 'FleetGraph could not reach the model. Please try again.' };
   const cost = { tier1Tokens: 0, tier2Tokens: res.inputTokens + res.outputTokens, usd: res.usd };
   const parsed = extractJson<{ reply?: string; action?: { kind: string; entityId: string; payload?: Record<string, unknown>; summary?: string } }>(res.text);
-  if (!parsed) return { answer: res.text, cost }; // model returned prose; use as-is
+  if (!parsed) {
+    // Parsing failed. Never surface raw JSON to the user — salvage the reply, else a clean fallback.
+    const m = res.text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (m) {
+      try { return { answer: JSON.parse(`"${m[1]}"`) as string, cost }; } catch { /* fall through */ }
+    }
+    const looksLikeJson = /^[\s`]*[[{]/.test(res.text) || res.text.includes('"reply"');
+    return { answer: looksLikeJson ? "I couldn't format that answer — please try asking again." : res.text, cost };
+  }
   const reply = parsed.reply ?? res.text;
   const a = parsed.action;
   const validIssueIds = new Set(issues.map((i) => i.id));
