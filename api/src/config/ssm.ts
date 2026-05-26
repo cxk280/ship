@@ -40,6 +40,14 @@ export async function loadProductionSecrets(): Promise<void> {
     return; // Use .env files for local dev
   }
 
+  // Skip the AWS SSM bootstrap on platforms that inject secrets directly as env vars
+  // (e.g. Railway). Gating here protects every startup entrypoint — index, migrate, and
+  // seed — not just the server, so production mode does not crash without AWS credentials.
+  if (process.env.LOAD_SSM === 'false' || process.env.RAILWAY_ENVIRONMENT) {
+    console.log('Skipping SSM secret load (LOAD_SSM=false or RAILWAY_ENVIRONMENT set); using env vars.');
+    return;
+  }
+
   const environment = process.env.ENVIRONMENT || 'prod';
   const basePath = `/ship/${environment}`;
 
@@ -58,6 +66,23 @@ export async function loadProductionSecrets(): Promise<void> {
   process.env.CORS_ORIGIN = corsOrigin;
   process.env.CDN_DOMAIN = cdnDomain;
   process.env.APP_BASE_URL = appBaseUrl;
+
+  // Optional: FleetGraph LangSmith tracing. Non-fatal if the params don't exist —
+  // tracing simply stays off. Bedrock needs no key (EB instance role provides creds).
+  try {
+    const [langsmithKey, langsmithProject] = await Promise.all([
+      getSSMSecret(`${basePath}/LANGCHAIN_API_KEY`).catch(() => ''),
+      getSSMSecret(`${basePath}/LANGCHAIN_PROJECT`).catch(() => ''),
+    ]);
+    if (langsmithKey) {
+      process.env.LANGCHAIN_API_KEY = langsmithKey;
+      process.env.LANGCHAIN_TRACING_V2 = process.env.LANGCHAIN_TRACING_V2 || 'true';
+      process.env.LANGCHAIN_PROJECT = langsmithProject || process.env.LANGCHAIN_PROJECT || 'fleetgraph';
+      console.log('FleetGraph: LangSmith tracing enabled from SSM');
+    }
+  } catch {
+    // tracing is optional; never block startup on it
+  }
 
   console.log('Secrets loaded from SSM Parameter Store');
   console.log(`CORS_ORIGIN: ${corsOrigin}`);

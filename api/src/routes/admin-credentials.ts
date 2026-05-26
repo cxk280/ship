@@ -48,8 +48,9 @@ function renderPage(options: {
   isConfigured: boolean;
   redirectUri: string;
   secretPath: string;
+  cspNonce: string;
 }): string {
-  const { currentConfig, isConfigured, redirectUri, secretPath } = options;
+  const { currentConfig, isConfigured, redirectUri, secretPath, cspNonce } = options;
 
   return `
 <!DOCTYPE html>
@@ -276,7 +277,7 @@ function renderPage(options: {
     </div>
   </div>
 
-  <script>
+  <script nonce="${escapeHtml(cspNonce)}">
     function showError(msg) {
       const el = document.getElementById('alert-error');
       el.textContent = msg;
@@ -455,6 +456,7 @@ router.get('/', authMiddleware, superAdminMiddleware, async (_req: Request, res:
     isConfigured: result.configured,
     redirectUri: getRedirectUri(),
     secretPath: getCAIASecretPath(),
+    cspNonce: res.locals.cspNonce || '',
   });
 
   res.setHeader('Content-Type', 'text/html');

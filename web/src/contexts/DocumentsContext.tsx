@@ -10,13 +10,14 @@
  *   After:  const { byType: { wiki: documents } } = useUnifiedDocuments({ type: 'wiki' })
  */
 import { createContext, useContext, ReactNode } from 'react';
-import { useDocuments as useDocumentsQuery, WikiDocument } from '@/hooks/useDocumentsQuery';
+import { useDocuments as useDocumentsQuery, WikiDocument, DocumentsError } from '@/hooks/useDocumentsQuery';
 
 export type { WikiDocument };
 
 interface DocumentsContextValue {
   documents: WikiDocument[];
   loading: boolean;
+  error: DocumentsError | null;
   createDocument: (parentId?: string) => Promise<WikiDocument | null>;
   updateDocument: (id: string, updates: Partial<WikiDocument>) => Promise<WikiDocument | null>;
   deleteDocument: (id: string) => Promise<boolean>;

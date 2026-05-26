@@ -335,7 +335,7 @@ export function ProjectsPage() {
       <p className="text-muted">No projects yet</p>
       <button
         onClick={handleCreateProject}
-        className="mt-2 text-sm text-accent hover:underline"
+        className="mt-2 text-sm font-medium text-foreground underline hover:no-underline"
       >
         Create your first project
       </button>
@@ -522,7 +522,7 @@ function ProjectRowContent({ project, visibleColumns, programNameById }: Project
       {/* ICE Score */}
       {visibleColumns.has('score') && (
         <td className="px-4 py-3 text-sm text-center font-medium" role="gridcell">
-          <span className="inline-flex items-center justify-center rounded bg-accent/20 px-2 py-0.5 text-accent whitespace-nowrap">
+          <span className="inline-flex items-center justify-center rounded bg-accent/20 px-2 py-0.5 text-foreground whitespace-nowrap">
             {project.ice_score}
           </span>
         </td>

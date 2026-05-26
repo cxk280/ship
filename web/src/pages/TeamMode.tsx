@@ -747,10 +747,7 @@ export function TeamModePage() {
                       isActiveViewAs && 'ring-2 ring-inset ring-accent/50 bg-accent/5'
                     )}
                   >
-                    <span className={cn(
-                      'text-xs font-medium',
-                      sprint.isCurrent ? 'text-accent' : 'text-foreground'
-                    )}>
+                    <span className="text-xs font-medium text-foreground">
                       {sprint.name}
                     </span>
                     <span className="text-[10px] text-muted">
@@ -957,4 +954,3 @@ function ViewAsIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-

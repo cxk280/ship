@@ -3,6 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import session from 'express-session';
+import crypto from 'crypto';
+import { join } from 'path';
 import { csrfSync } from 'csrf-sync';
 import rateLimit from 'express-rate-limit';
 import authRoutes from './routes/auth.js';
@@ -25,6 +27,7 @@ import { filesRouter } from './routes/files.js';
 import caiaAuthRoutes from './routes/caia-auth.js';
 import apiTokensRoutes from './routes/api-tokens.js';
 import adminCredentialsRoutes from './routes/admin-credentials.js';
+import securityProbeRoutes from './routes/security-probe.js';
 import claudeRoutes from './routes/claude.js';
 import activityRoutes from './routes/activity.js';
 import dashboardRoutes from './routes/dashboard.js';
@@ -33,6 +36,7 @@ import accountabilityRoutes from './routes/accountability.js';
 import aiRoutes from './routes/ai.js';
 import weeklyPlansRoutes, { weeklyRetrosRouter } from './routes/weekly-plans.js';
 import { documentCommentsRouter, commentsRouter } from './routes/comments.js';
+import fleetgraphRoutes from './routes/fleetgraph.js';
 import { setupSwagger } from './swagger.js';
 import { initializeCAIA } from './services/caia.js';
 
@@ -90,8 +94,9 @@ const apiLimiter = rateLimit({
 export function createApp(corsOrigin: string = 'http://localhost:5173'): express.Express {
   const app = express();
 
-  // Trust proxy headers (CloudFront) for secure cookies and correct protocol detection
-  if (process.env.NODE_ENV === 'production') {
+  // Trust proxy headers (CloudFront/Railway) for secure cookies, rate limiting,
+  // and correct protocol detection behind managed reverse proxies.
+  if (process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT) {
     app.set('trust proxy', 1);
 
     // CloudFront with viewer_protocol_policy="redirect-to-https" always serves viewers over HTTPS.
@@ -107,6 +112,11 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     });
   }
 
+  app.use((_req, res, next) => {
+    res.locals.cspNonce = crypto.randomBytes(16).toString('base64');
+    next();
+  });
+
   // Middleware - Security headers
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },  // Allow images to be loaded cross-origin
@@ -114,11 +124,11 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"], // Admin credentials page uses inline scripts
-        styleSrc: ["'self'", "'unsafe-inline'"], // TipTap editor needs inline styles
+        scriptSrc: ["'self'", (_req, res) => `'nonce-${(res as Response).locals.cspNonce}'`],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], // TipTap inline styles + Google Fonts stylesheet
         imgSrc: ["'self'", "data:", "blob:", "https:"],
         connectSrc: ["'self'", "wss:", "ws:"], // WebSocket connections
-        fontSrc: ["'self'", "data:"],
+        fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"], // Google Fonts (Inter) loaded in index.html
         objectSrc: ["'none'"],
         frameSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -229,6 +239,10 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   // Admin credentials management (CSRF protected, super-admin only)
   app.use('/api/admin/credentials', conditionalCsrf, adminCredentialsRoutes);
 
+  // Security probe runner (CSRF protected, super-admin only) — runs the Category 8
+  // probe against this app's own origin and returns a structured report.
+  app.use('/api/security-probe', conditionalCsrf, securityProbeRoutes);
+
   // File upload routes (CSRF protected for POST endpoints)
   app.use('/api/files', conditionalCsrf, filesRouter);
 
@@ -236,10 +250,24 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   app.use('/api/documents', conditionalCsrf, documentCommentsRouter);
   app.use('/api/comments', conditionalCsrf, commentsRouter);
 
+  // FleetGraph agent routes — on-demand chat, inbox, HITL approval resume
+  app.use('/api/fleetgraph', conditionalCsrf, fleetgraphRoutes);
+
   // Initialize CAIA OAuth client at startup
   initializeCAIA().catch((err) => {
     console.warn('CAIA initialization failed:', err);
   });
+
+  if (process.env.WEB_DIST_DIR) {
+    const webDistDir = process.env.WEB_DIST_DIR;
+    app.use(express.static(webDistDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path === '/health') {
+        return next();
+      }
+      res.sendFile(join(webDistDir, 'index.html'));
+    });
+  }
 
   return app;
 }

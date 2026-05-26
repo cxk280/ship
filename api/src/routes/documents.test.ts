@@ -94,6 +94,17 @@ describe('Documents API - PATCH with Issue Fields', () => {
   })
 
   describe('PATCH /api/documents/:id with top-level issue fields', () => {
+    it('should reject an invalid document id without hitting Postgres UUID casting', async () => {
+      const response = await request(app)
+        .patch('/api/documents/not-a-uuid')
+        .set('Cookie', sessionCookie)
+        .set('x-csrf-token', csrfToken)
+        .send({ title: 'Should not update' })
+
+      expect(response.status).toBe(400)
+      expect(response.body.error).toBe('Invalid document id')
+    })
+
     it('should accept state at top level and store in properties', async () => {
       const response = await request(app)
         .patch(`/api/documents/${testIssueId}`)
@@ -194,6 +205,110 @@ describe('Documents API - PATCH with Issue Fields', () => {
       expect(response.body.properties.estimate).toBe(8)
       expect(response.body.properties.assignee_id).toBe(testUserId)
     })
+  })
+})
+
+describe('Documents API - List Summary Mode', () => {
+  const app = createApp()
+  const testRunId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+  const testEmail = `docs-summary-${testRunId}@ship.local`
+  const testWorkspaceName = `Docs Summary Test ${testRunId}`
+
+  let sessionCookie: string
+  let csrfToken: string
+  let testWorkspaceId: string
+  let testUserId: string
+
+  beforeAll(async () => {
+    const workspaceResult = await pool.query(
+      `INSERT INTO workspaces (name) VALUES ($1) RETURNING id`,
+      [testWorkspaceName]
+    )
+    testWorkspaceId = workspaceResult.rows[0].id
+
+    const userResult = await pool.query(
+      `INSERT INTO users (email, password_hash, name)
+       VALUES ($1, 'test-hash', 'Test User')
+       RETURNING id`,
+      [testEmail]
+    )
+    testUserId = userResult.rows[0].id
+
+    await pool.query(
+      `INSERT INTO workspace_memberships (workspace_id, user_id, role)
+       VALUES ($1, $2, 'member')`,
+      [testWorkspaceId, testUserId]
+    )
+
+    const sessionId = crypto.randomBytes(32).toString('hex')
+    await pool.query(
+      `INSERT INTO sessions (id, user_id, workspace_id, expires_at)
+       VALUES ($1, $2, $3, now() + interval '1 hour')`,
+      [sessionId, testUserId, testWorkspaceId]
+    )
+    sessionCookie = `session_id=${sessionId}`
+
+    const csrfRes = await request(app)
+      .get('/api/csrf-token')
+      .set('Cookie', sessionCookie)
+    csrfToken = csrfRes.body.token
+    const connectSidCookie = csrfRes.headers['set-cookie']?.[0]?.split(';')[0] || ''
+    if (connectSidCookie) {
+      sessionCookie = `${sessionCookie}; ${connectSidCookie}`
+    }
+
+    await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, created_by, properties)
+       VALUES ($1, 'wiki', 'Summary Wiki', $2, '{"large_field": "not needed in list", "color": "#123456"}')`,
+      [testWorkspaceId, testUserId]
+    )
+  })
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM sessions WHERE user_id = $1', [testUserId])
+    await pool.query('DELETE FROM documents WHERE workspace_id = $1', [testWorkspaceId])
+    await pool.query('DELETE FROM workspace_memberships WHERE user_id = $1', [testUserId])
+    await pool.query('DELETE FROM users WHERE id = $1', [testUserId])
+    await pool.query('DELETE FROM workspaces WHERE id = $1', [testWorkspaceId])
+  })
+
+  it('omits JSONB properties payloads when summary=true', async () => {
+    const response = await request(app)
+      .get('/api/documents?type=wiki&summary=true')
+      .set('Cookie', sessionCookie)
+
+    expect(response.status).toBe(200)
+    expect(response.body).toHaveLength(1)
+    expect(response.body[0].title).toBe('Summary Wiki')
+    expect(response.body[0].properties).toEqual({})
+    expect(response.body[0].color).toBeUndefined()
+  })
+
+  it('invalidates cached summary lists after creating a document', async () => {
+    const firstResponse = await request(app)
+      .get('/api/documents?type=wiki&summary=true')
+      .set('Cookie', sessionCookie)
+
+    expect(firstResponse.status).toBe(200)
+    expect(firstResponse.body.map((doc: { title: string }) => doc.title)).toEqual(['Summary Wiki'])
+
+    const createResponse = await request(app)
+      .post('/api/documents')
+      .set('Cookie', sessionCookie)
+      .set('x-csrf-token', csrfToken)
+      .send({
+        title: 'Fresh Summary Wiki',
+        document_type: 'wiki',
+      })
+
+    expect(createResponse.status).toBe(201)
+
+    const secondResponse = await request(app)
+      .get('/api/documents?type=wiki&summary=true')
+      .set('Cookie', sessionCookie)
+
+    expect(secondResponse.status).toBe(200)
+    expect(secondResponse.body.map((doc: { title: string }) => doc.title)).toContain('Fresh Summary Wiki')
   })
 })
 

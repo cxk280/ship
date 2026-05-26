@@ -5,6 +5,7 @@ node_modules
 # Build outputs
 dist
 build
+coverage
 .turbo
 *.tsbuildinfo
 
@@ -63,7 +64,6 @@ test-results/
 
 # Audit artifacts
 .audit
-ShipShape_Demo_Deck.pptx
 
 # Terraform
 terraform/.terraform/

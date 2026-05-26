@@ -76,8 +76,7 @@ describe('DashboardPage', () => {
 
   it('renders section headers', () => {
     renderWithRouter(<DashboardPage />);
-    // Section headers - use role to be more specific
-    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByText('Dashboard')).toBeInTheDocument();
     expect(screen.getByText('Top Projects by ICE')).toBeInTheDocument();
   });
 

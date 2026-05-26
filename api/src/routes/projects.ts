@@ -3,6 +3,7 @@ import { pool } from '../db/client.js';
 import { z } from 'zod';
 import { getVisibilityContext, VISIBILITY_FILTER_SQL } from '../middleware/visibility.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { assertAuthenticatedRequest } from '../utils/authenticated-request.js';
 import { DEFAULT_PROJECT_PROPERTIES, computeICEScore } from '@ship/shared';
 import { checkDocumentCompleteness } from '../utils/extractHypothesis.js';
 import { logDocumentChange, getLatestDocumentFieldHistory } from '../utils/document-crud.js';
@@ -315,8 +316,8 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
     const includeArchived = req.query.archived === 'true';
     const sortField = (req.query.sort as string) || 'ice_score';
     const sortDir = (req.query.dir as string) === 'asc' ? 'ASC' : 'DESC';
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Validate sort field to prevent SQL injection
     if (!VALID_SORT_FIELDS.includes(sortField)) {
@@ -340,63 +341,67 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
       orderByClause = `d.${sortField} ${sortDir}`;
     }
 
-    // Subquery to compute inferred status based on sprint allocations
-    // Priority: archived > completed (retro done) > active (current sprint allocation) > planned (future allocation) > backlog
-    // Sprint timing is computed from sprint_number + workspace.sprint_start_date:
-    //   - current: today is within the sprint's 7-day window
-    //   - future: sprint hasn't started yet
-    //   - past: sprint window has passed
-    // Allocations are tracked via sprint documents with properties.project_id
-    const inferredStatusSubquery = `
-      CASE
-        WHEN d.archived_at IS NOT NULL THEN 'archived'
-        WHEN d.properties->>'plan_validated' IS NOT NULL THEN 'completed'
-        ELSE COALESCE(
-          (
-            SELECT
-              CASE MAX(
-                CASE
-                  -- Compute sprint timing: current=3, future=2, past=1
-                  WHEN CURRENT_DATE BETWEEN
-                    (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
-                    AND (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7 + 6)
-                  THEN 3  -- current sprint
-                  WHEN CURRENT_DATE < (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
-                  THEN 2  -- future sprint
-                  ELSE 1  -- past sprint
-                END
-              )
-              WHEN 3 THEN 'active'
-              WHEN 2 THEN 'planned'
-              ELSE NULL  -- past allocations don't count
-              END
-            FROM documents sprint
-            JOIN workspaces w ON w.id = sprint.workspace_id
-            WHERE sprint.document_type = 'sprint'
-              AND sprint.workspace_id = d.workspace_id
-              AND (sprint.properties->>'project_id')::uuid = d.id
-              AND jsonb_array_length(COALESCE(sprint.properties->'assignee_ids', '[]'::jsonb)) > 0
-          ),
-          'backlog'
-        )
-      END
-    `;
-
+    // Inferred status is computed from sprint allocations.
+    // Priority: archived > completed (retro done) > active (current sprint allocation) > planned (future allocation) > backlog.
+    // Sprint timing is derived from sprint_number + workspace.sprint_start_date (current=3, future=2, past=1).
+    // Previously this ran three correlated per-row subqueries (sprint count, issue count, and a per-project
+    // sprint-timing scan). Those are replaced with three pre-aggregated CTEs joined once, so the planner does a
+    // single grouped scan of associations/sprints instead of re-scanning per project row. Output is identical.
     let query = `
+      WITH sprint_counts AS (
+        SELECT da.related_id AS project_id, COUNT(*) AS cnt
+        FROM document_associations da
+        JOIN documents s ON s.id = da.document_id AND s.document_type = 'sprint'
+        WHERE da.relationship_type = 'project'
+        GROUP BY da.related_id
+      ),
+      issue_counts AS (
+        SELECT da.related_id AS project_id, COUNT(*) AS cnt
+        FROM document_associations da
+        JOIN documents i ON i.id = da.document_id AND i.document_type = 'issue'
+        WHERE da.relationship_type = 'project'
+        GROUP BY da.related_id
+      ),
+      project_timing AS (
+        SELECT (sprint.properties->>'project_id')::uuid AS project_id,
+               MAX(
+                 CASE
+                   WHEN CURRENT_DATE BETWEEN
+                     (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
+                     AND (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7 + 6)
+                   THEN 3  -- current sprint
+                   WHEN CURRENT_DATE < (w.sprint_start_date + ((sprint.properties->>'sprint_number')::int - 1) * 7)
+                   THEN 2  -- future sprint
+                   ELSE 1  -- past sprint
+                 END
+               ) AS max_timing
+        FROM documents sprint
+        JOIN workspaces w ON w.id = sprint.workspace_id
+        WHERE sprint.document_type = 'sprint'
+          AND sprint.workspace_id = $1
+          AND sprint.properties->>'project_id' IS NOT NULL
+          AND jsonb_array_length(COALESCE(sprint.properties->'assignee_ids', '[]'::jsonb)) > 0
+        GROUP BY (sprint.properties->>'project_id')::uuid
+      )
       SELECT d.id, d.title, d.properties, prog_da.related_id as program_id, d.archived_at, d.created_at, d.updated_at,
              d.converted_from_id,
              (d.properties->>'owner_id')::uuid as owner_id,
              u.name as owner_name, u.email as owner_email,
-             (SELECT COUNT(*) FROM documents s
-              JOIN document_associations da ON da.document_id = s.id AND da.related_id = d.id AND da.relationship_type = 'project'
-              WHERE s.document_type = 'sprint') as sprint_count,
-             (SELECT COUNT(*) FROM documents i
-              JOIN document_associations da ON da.document_id = i.id AND da.related_id = d.id AND da.relationship_type = 'project'
-              WHERE i.document_type = 'issue') as issue_count,
-             (${inferredStatusSubquery}) as inferred_status
+             COALESCE(sc.cnt, 0) as sprint_count,
+             COALESCE(ic.cnt, 0) as issue_count,
+             CASE
+               WHEN d.archived_at IS NOT NULL THEN 'archived'
+               WHEN d.properties->>'plan_validated' IS NOT NULL THEN 'completed'
+               WHEN pt.max_timing = 3 THEN 'active'
+               WHEN pt.max_timing = 2 THEN 'planned'
+               ELSE 'backlog'
+             END as inferred_status
       FROM documents d
       LEFT JOIN users u ON u.id = (d.properties->>'owner_id')::uuid
       LEFT JOIN document_associations prog_da ON prog_da.document_id = d.id AND prog_da.relationship_type = 'program'
+      LEFT JOIN sprint_counts sc ON sc.project_id = d.id
+      LEFT JOIN issue_counts ic ON ic.project_id = d.id
+      LEFT JOIN project_timing pt ON pt.project_id = d.id
       WHERE d.workspace_id = $1 AND d.document_type = 'project'
         AND ${VISIBILITY_FILTER_SQL('d', '$2', '$3')}
     `;
@@ -420,8 +425,8 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
 router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -601,8 +606,8 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
 router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     const parsed = updateProjectSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -855,8 +860,8 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
 router.delete('/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -897,8 +902,8 @@ router.delete('/:id', authMiddleware, async (req: Request, res: Response) => {
 router.get('/:id/retro', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -996,8 +1001,8 @@ router.get('/:id/retro', authMiddleware, async (req: Request, res: Response) => 
 router.post('/:id/retro', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     const parsed = projectRetroSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1130,8 +1135,8 @@ function extractSprintFromRow(row: any) {
 router.get('/:id/issues', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -1205,8 +1210,8 @@ router.get('/:id/issues', authMiddleware, async (req: Request, res: Response) =>
 router.get('/:id/weeks', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -1264,8 +1269,8 @@ router.get('/:id/weeks', authMiddleware, async (req: Request, res: Response) => 
 router.get('/:id/sprints', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for filtering
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -1323,8 +1328,8 @@ router.get('/:id/sprints', authMiddleware, async (req: Request, res: Response) =
 router.post('/:id/sprints', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     const parsed = createProjectSprintSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1494,8 +1499,8 @@ router.post('/:id/sprints', authMiddleware, async (req: Request, res: Response) 
 router.patch('/:id/retro', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     const parsed = projectRetroSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1608,8 +1613,8 @@ router.patch('/:id/retro', authMiddleware, async (req: Request, res: Response) =
 router.post('/:id/approve-plan', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for admin check
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);
@@ -1672,8 +1677,8 @@ router.post('/:id/approve-plan', authMiddleware, async (req: Request, res: Respo
 router.post('/:id/approve-retro', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userId = req.userId!;
-    const workspaceId = req.workspaceId!;
+    assertAuthenticatedRequest(req);
+    const { userId, workspaceId } = req;
 
     // Get visibility context for admin check
     const { isAdmin } = await getVisibilityContext(userId, workspaceId);

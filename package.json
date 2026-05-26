@@ -24,7 +24,10 @@
     "type-check": "pnpm --recursive run type-check",
     "lint": "pnpm --recursive run lint",
     "clean": "pnpm --recursive run clean && rm -rf node_modules",
-    "test": "pnpm --filter @ship/api test",
+    "test": "pnpm --filter @ship/api test && pnpm --filter @ship/web test",
+    "test:coverage": "DATABASE_URL=${DATABASE_URL:-postgres://ship:ship_dev_password@localhost:5433/ship_dev} pnpm --filter @ship/api test:coverage && pnpm --filter @ship/web test:coverage",
+    "test:coverage:changed": "pnpm test:coverage && node scripts/check-changed-coverage.mjs && node scripts/check-coverage-ratchet.mjs",
+    "security:probe": "node scripts/security-probe.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "worktree:init": "./scripts/worktree-init.sh",
@@ -39,6 +42,7 @@
     "@playwright/test": "^1.57.0",
     "@testcontainers/postgresql": "^11.11.0",
     "@types/supertest": "^6.0.3",
+    "@vitest/coverage-v8": "4.0.17",
     "@vitest/ui": "^4.0.16",
     "get-port": "^7.1.0",
     "husky": "^9.1.7",
@@ -46,6 +50,18 @@
     "supertest": "^7.1.4",
     "testcontainers": "^11.11.0",
     "typescript": "^5.7.2",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.16",
+    "ws": "^8.19.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-xml-parser": "^5.5.6",
+      "hono": "^4.12.4",
+      "@hono/node-server": "^1.19.10",
+      "express-rate-limit": "^8.2.2",
+      "fast-uri": "^3.1.2",
+      "express>path-to-regexp": "0.1.13",
+      "router>path-to-regexp": "^8.4.0"
+    }
   }
 }

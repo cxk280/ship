@@ -35,9 +35,12 @@ import { ProjectSetupWizard, ProjectSetupData } from '@/components/ProjectSetupW
 import { SelectionPersistenceProvider } from '@/contexts/SelectionPersistenceContext';
 import { ActionItemsModal } from '@/components/ActionItemsModal';
 import { AccountabilityBanner } from '@/components/AccountabilityBanner';
+import { FleetGraphDock } from '@/components/fleetgraph/FleetGraphDock';
 import { ProjectContextSidebar } from '@/components/sidebars/ProjectContextSidebar';
 
 type Mode = 'docs' | 'issues' | 'projects' | 'programs' | 'sprints' | 'team' | 'settings' | 'dashboard' | 'project-context';
+
+const ACTION_ITEMS_MODAL_DISMISSED_KEY = 'ship:actionItemsModalDismissedThisSession';
 
 export function AppLayout() {
   const { user, logout, isSuperAdmin, impersonating, endImpersonation } = useAuth();
@@ -118,11 +121,17 @@ export function AppLayout() {
   // Disabled when localStorage flag is set (used by E2E tests to avoid blocking interactions)
   useEffect(() => {
     if (localStorage.getItem('ship:disableActionItemsModal') === 'true') return;
+    if (sessionStorage.getItem(ACTION_ITEMS_MODAL_DISMISSED_KEY) === 'true') return;
     if (!actionItemsModalShownOnLoad && hasActionItems && actionItemsData?.items) {
       setActionItemsModalOpen(true);
       setActionItemsModalShownOnLoad(true);
     }
   }, [actionItemsModalShownOnLoad, hasActionItems, actionItemsData?.items]);
+
+  const closeActionItemsModal = useCallback(() => {
+    sessionStorage.setItem(ACTION_ITEMS_MODAL_DISMISSED_KEY, 'true');
+    setActionItemsModalOpen(false);
+  }, []);
 
   // Accessibility: focus management on navigation
   useFocusOnNavigate();
@@ -549,6 +558,9 @@ export function AppLayout() {
         <aside id="properties-portal" aria-label="Document properties" className="flex flex-col" />
       </div>
 
+      {/* FleetGraph agent: context-aware chat + proactive findings inbox */}
+      <FleetGraphDock />
+
       {/* Command Palette (Cmd+K) */}
       <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
 
@@ -573,7 +585,7 @@ export function AppLayout() {
       {/* Action Items Modal - shows on login when user has pending accountability tasks */}
       <ActionItemsModal
         open={actionItemsModalOpen}
-        onClose={() => setActionItemsModalOpen(false)}
+        onClose={closeActionItemsModal}
       />
     </div>
     </SelectionPersistenceProvider>

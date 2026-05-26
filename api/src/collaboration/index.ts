@@ -304,42 +304,50 @@ function getAwareness(docName: string, doc: Y.Doc): awarenessProtocol.Awareness 
 }
 
 function handleMessage(ws: WebSocket, message: Uint8Array, docName: string, doc: Y.Doc, aw: awarenessProtocol.Awareness) {
-  const decoder = decoding.createDecoder(message);
-  const messageType = decoding.readVarUint(decoder);
+  try {
+    const decoder = decoding.createDecoder(message);
+    const messageType = decoding.readVarUint(decoder);
 
-  switch (messageType) {
-    case messageSync: {
-      const encoder = encoding.createEncoder();
-      encoding.writeVarUint(encoder, messageSync);
-      // Pass ws as origin so broadcast excludes the sender
-      syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
+    switch (messageType) {
+      case messageSync: {
+        const encoder = encoding.createEncoder();
+        encoding.writeVarUint(encoder, messageSync);
+        // Pass ws as origin so broadcast excludes the sender
+        syncProtocol.readSyncMessage(decoder, encoder, doc, ws);
 
-      if (encoding.length(encoder) > 1) {
-        ws.send(encoding.toUint8Array(encoder));
-      }
-      break;
-    }
-    case messageAwareness: {
-      const awarenessData = decoding.readVarUint8Array(decoder);
-
-      // Extract the actual client's awarenessClientId from the update
-      // This is critical for proper cleanup on disconnect - the server was
-      // previously storing doc.clientID (server's ID) instead of the client's
-      // actual awareness clientID, causing stale states on page refresh.
-      // Format: [numStates, ...for each: clientId, clock, stateJson]
-      const conn = conns.get(ws);
-      if (conn) {
-        const updateDecoder = decoding.createDecoder(awarenessData);
-        const numStates = decoding.readVarUint(updateDecoder);
-        if (numStates > 0) {
-          const clientId = decoding.readVarUint(updateDecoder);
-          conn.awarenessClientId = clientId;
+        if (encoding.length(encoder) > 1) {
+          ws.send(encoding.toUint8Array(encoder));
         }
+        break;
       }
+      case messageAwareness: {
+        const awarenessData = decoding.readVarUint8Array(decoder);
 
-      awarenessProtocol.applyAwarenessUpdate(aw, awarenessData, ws);
-      break;
+        // Extract the actual client's awarenessClientId from the update
+        // This is critical for proper cleanup on disconnect - the server was
+        // previously storing doc.clientID (server's ID) instead of the client's
+        // actual awareness clientID, causing stale states on page refresh.
+        // Format: [numStates, ...for each: clientId, clock, stateJson]
+        const conn = conns.get(ws);
+        if (conn) {
+          const updateDecoder = decoding.createDecoder(awarenessData);
+          const numStates = decoding.readVarUint(updateDecoder);
+          if (numStates > 0) {
+            const clientId = decoding.readVarUint(updateDecoder);
+            conn.awarenessClientId = clientId;
+          }
+        }
+
+        awarenessProtocol.applyAwarenessUpdate(aw, awarenessData, ws);
+        break;
+      }
+      default:
+        console.warn(`[Collaboration] Rejected unsupported message type ${messageType} for ${docName}`);
+        ws.close(1003, 'Unsupported collaboration message type');
     }
+  } catch (err) {
+    console.warn(`[Collaboration] Rejected malformed message for ${docName}:`, err instanceof Error ? err.message : err);
+    ws.close(1003, 'Malformed collaboration message');
   }
 }
 
@@ -745,6 +753,10 @@ export function setupCollaboration(server: Server) {
       handleMessage(ws, new Uint8Array(data), docName, doc, aw);
     });
 
+    ws.on('error', (err) => {
+      console.warn(`[Collaboration] WebSocket error for ${docName}:`, err instanceof Error ? err.message : err);
+    });
+
     ws.on('close', () => {
       const conn = conns.get(ws);
       if (conn) {
@@ -819,6 +831,10 @@ export function setupCollaboration(server: Server) {
       } catch {
         // Ignore invalid messages
       }
+    });
+
+    ws.on('error', (err) => {
+      console.warn(`[Events] WebSocket error for user ${sessionData.userId}:`, err instanceof Error ? err.message : err);
     });
 
     ws.on('close', () => {

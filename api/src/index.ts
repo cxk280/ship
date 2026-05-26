@@ -6,13 +6,25 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception:', error);
+  process.exit(1);
+});
+
 // Load environment variables (.env.local takes precedence)
 config({ path: join(__dirname, '../.env.local') });
 config({ path: join(__dirname, '../.env') });
 
 async function main() {
   // Load secrets from SSM in production (before importing app)
-  if (process.env.NODE_ENV === 'production') {
+  const shouldLoadSsm = process.env.NODE_ENV === 'production'
+    && process.env.LOAD_SSM !== 'false'
+    && !process.env.RAILWAY_ENVIRONMENT;
+  if (shouldLoadSsm) {
     const { loadProductionSecrets } = await import('./config/ssm.js');
     await loadProductionSecrets();
   }
@@ -36,9 +48,17 @@ async function main() {
   setupCollaboration(server);
 
   // Start server
-  server.listen(PORT, () => {
+  server.listen(PORT, async () => {
     console.log(`API server running on http://localhost:${PORT}`);
     console.log(`CORS origin: ${CORS_ORIGIN}`);
+
+    // Start FleetGraph proactive triggers (cron sweep + mutation queue).
+    try {
+      const { startFleetGraph } = await import('./fleetgraph/triggers.js');
+      startFleetGraph();
+    } catch (err) {
+      console.error('[FleetGraph] failed to start:', err);
+    }
   });
 }
 

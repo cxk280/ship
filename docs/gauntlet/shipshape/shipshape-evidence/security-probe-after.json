@@ -1,0 +1,205 @@
+{
+  "tool": "shipshape-security-probe",
+  "startedAt": "2026-05-24T16:25:22.932Z",
+  "target": "http://127.0.0.1:3000",
+  "findings": [],
+  "checks": [
+    {
+      "category": "manual-review",
+      "name": "CSP script-src does not allow unsafe-inline",
+      "status": "pass",
+      "details": {
+        "csp": "default-src 'self';script-src 'self' 'nonce-VlakWd25Equt3NP6JKPC2Q==';style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;img-src 'self' data: blob: https:;connect-src 'self' wss: ws:;font-src 'self' data: https://fonts.gstatic.com;object-src 'none';frame-src 'none';base-uri 'self';form-action 'self';frame-ancestors 'self';script-src-attr 'none';upgrade-insecure-requests"
+      }
+    },
+    {
+      "category": "manual-review",
+      "name": "CORS does not use wildcard credentials",
+      "status": "pass",
+      "details": {
+        "accessControlAllowOrigin": "http://localhost:5173",
+        "accessControlAllowCredentials": "true"
+      }
+    },
+    {
+      "category": "auth-session",
+      "name": "Unauthenticated auth/me access",
+      "status": "pass",
+      "details": {
+        "status": 401,
+        "body": {
+          "success": false,
+          "error": {
+            "code": "UNAUTHORIZED",
+            "message": "No session found"
+          }
+        }
+      }
+    },
+    {
+      "category": "auth-session",
+      "name": "Admin login",
+      "status": "pass",
+      "details": {
+        "status": 200,
+        "sessionLength": 64
+      }
+    },
+    {
+      "category": "auth-session",
+      "name": "Session token entropy format",
+      "status": "pass",
+      "details": {
+        "sessionLength": 64,
+        "hex64": true
+      }
+    },
+    {
+      "category": "auth-session",
+      "name": "Member privilege escalation to super-admin route",
+      "status": "pass",
+      "details": {
+        "status": 403,
+        "body": {
+          "success": false,
+          "error": {
+            "code": "FORBIDDEN",
+            "message": "Super-admin access required"
+          }
+        }
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Stored XSS title payload rejected or sanitized",
+      "status": "pass",
+      "details": {
+        "status": 201,
+        "acceptedRawPayload": false,
+        "id": "4c21858b-49fb-4579-8da7-94cac7ff354f"
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Stored XSS content payload rejected or sanitized",
+      "status": "pass",
+      "details": {
+        "status": 200,
+        "acceptedRawPayload": false,
+        "id": "4c21858b-49fb-4579-8da7-94cac7ff354f"
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Reflected XSS search query is not echoed raw",
+      "status": "pass",
+      "details": {
+        "status": 200,
+        "reflectedRawPayload": false
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "Excessively long document title rejected",
+      "status": "pass",
+      "details": {
+        "status": 400,
+        "body": {
+          "error": "Invalid input",
+          "details": [
+            {
+              "code": "too_big",
+              "maximum": 255,
+              "type": "string",
+              "inclusive": true,
+              "exact": false,
+              "message": "String must contain at most 255 character(s)",
+              "path": [
+                "title"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "category": "input-sanitization",
+      "name": "SQL injection title payload does not cause server error",
+      "status": "pass",
+      "details": {
+        "status": 201,
+        "id": "94c53187-7e54-4d6c-be87-aa9aec354a77"
+      }
+    },
+    {
+      "category": "dependencies",
+      "name": "Dependency vulnerability audit parsed",
+      "status": "pass",
+      "details": {
+        "tool": "pnpm audit --json --prod",
+        "exitStatus": 1,
+        "highCriticalCount": 0,
+        "stderr": ""
+      }
+    },
+    {
+      "category": "websocket-validation",
+      "name": "Unauthenticated collaboration WebSocket rejected",
+      "status": "pass",
+      "details": {
+        "closed": true,
+        "error": "Unexpected server response: 401",
+        "readyState": 2
+      }
+    },
+    {
+      "category": "websocket-validation",
+      "name": "Unexpected collaboration message type rejected",
+      "status": "pass",
+      "details": {
+        "closed": true,
+        "code": 1003,
+        "reason": "Unsupported collaboration message type",
+        "readyState": 3
+      }
+    },
+    {
+      "category": "websocket-validation",
+      "name": "Malformed empty collaboration message rejected without process crash",
+      "status": "pass",
+      "details": {
+        "malformedResult": {
+          "closed": true,
+          "code": 1003,
+          "reason": "Malformed collaboration message",
+          "readyState": 3
+        },
+        "healthStatus": 200,
+        "healthBody": {
+          "status": "ok"
+        }
+      }
+    },
+    {
+      "category": "websocket-validation",
+      "name": "Oversized collaboration message rejected",
+      "status": "pass",
+      "details": {
+        "closed": true,
+        "code": 1009,
+        "reason": "",
+        "readyState": 3
+      }
+    }
+  ],
+  "summary": {
+    "totalChecks": 16,
+    "passedChecks": 16,
+    "failedChecks": 0,
+    "skippedChecks": 0,
+    "totalFindings": 0,
+    "bySeverity": {},
+    "byCategory": {}
+  },
+  "completedAt": "2026-05-24T16:25:26.706Z"
+}

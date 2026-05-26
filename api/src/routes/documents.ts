@@ -6,6 +6,7 @@ import { isWorkspaceAdmin } from '../middleware/visibility.js';
 import { handleVisibilityChange, handleDocumentConversion, invalidateDocumentCache, broadcastToUser } from '../collaboration/index.js';
 import { extractHypothesisFromContent, extractSuccessCriteriaFromContent, extractVisionFromContent, extractGoalsFromContent, checkDocumentCompleteness } from '../utils/extractHypothesis.js';
 import { loadContentFromYjsState } from '../utils/yjsConverter.js';
+import { sanitizeTitle, sanitizeTipTapContent } from '../utils/sanitizeContent.js';
 
 type RouterType = ReturnType<typeof Router>;
 const router: RouterType = Router();
@@ -90,63 +91,123 @@ const updateDocumentSchema = z.object({
   plan: z.string().optional(), // Alias for hypothesis (frontend sends 'plan', stored as 'plan' in properties)
 });
 
+const uuidParamSchema = z.string().uuid();
+
+const SUMMARY_LIST_CACHE_TTL_MS = 10_000;
+const summaryListCache = new Map<string, { expiresAt: number; body: string }>();
+const summaryListInFlight = new Map<string, Promise<string>>();
+
+function clearSummaryListCache(workspaceId?: string) {
+  if (!workspaceId) {
+    summaryListCache.clear();
+    return;
+  }
+
+  for (const key of summaryListCache.keys()) {
+    if (key.startsWith(`${workspaceId}:`)) {
+      summaryListCache.delete(key);
+    }
+  }
+}
+
 // List documents
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
-    const { type, parent_id } = req.query;
+    const { type, parent_id, summary } = req.query;
     const userId = req.userId!;
     const workspaceId = req.workspaceId!;
+    const summaryOnly = summary === 'true';
 
     // Check if user is admin (admins can see all documents)
-    const isAdmin = await isWorkspaceAdmin(userId, workspaceId);
+    const isAdmin = req.isSuperAdmin || await isWorkspaceAdmin(userId, workspaceId);
+    const cacheKey = summaryOnly
+      ? `${workspaceId}:${userId}:${isAdmin}:${type ?? ''}:${parent_id ?? ''}`
+      : null;
 
-    let query = `
-      SELECT id, workspace_id, document_type, title, parent_id, position,
-             ticket_number, properties,
-             created_at, updated_at, created_by, visibility
-      FROM documents
-      WHERE workspace_id = $1
-        AND archived_at IS NULL
-        AND deleted_at IS NULL
-        AND (visibility = 'workspace' OR created_by = $2 OR $3 = TRUE)
-    `;
-    const params: (string | boolean | null)[] = [workspaceId, userId, isAdmin];
+    if (cacheKey) {
+      const cached = summaryListCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        res.type('application/json').send(cached.body);
+        return;
+      }
 
-    if (type) {
-      query += ` AND document_type = $${params.length + 1}`;
-      params.push(type as string);
-    }
-
-    if (parent_id !== undefined) {
-      if (parent_id === 'null' || parent_id === '') {
-        query += ` AND parent_id IS NULL`;
-      } else {
-        query += ` AND parent_id = $${params.length + 1}`;
-        params.push(parent_id as string);
+      const inFlight = summaryListInFlight.get(cacheKey);
+      if (inFlight) {
+        res.type('application/json').send(await inFlight);
+        return;
       }
     }
 
-    query += ` ORDER BY position ASC, created_at DESC`;
+    const loadDocumentsList = async () => {
+      let query = `
+        SELECT id, workspace_id, document_type, title, parent_id, position,
+               ticket_number, ${summaryOnly ? "'{}'::jsonb as properties" : 'properties'},
+               created_at, updated_at, created_by, visibility
+        FROM documents
+        WHERE workspace_id = $1
+          AND archived_at IS NULL
+          AND deleted_at IS NULL
+          AND (visibility = 'workspace' OR created_by = $2 OR $3 = TRUE)
+      `;
+      const params: (string | boolean | null)[] = [workspaceId, userId, isAdmin];
 
-    const result = await pool.query(query, params);
+      if (type) {
+        query += ` AND document_type = $${params.length + 1}`;
+        params.push(type as string);
+      }
 
-    // Extract properties into flat fields for backwards compatibility
-    const documents = result.rows.map(row => {
-      const props = row.properties || {};
-      return {
-        ...row,
-        // Flatten common properties for backwards compatibility
-        state: props.state,
-        priority: props.priority,
-        estimate: props.estimate,
-        assignee_id: props.assignee_id,
-        source: props.source,
-        prefix: props.prefix,
-        color: props.color,
-      };
-    });
+      if (parent_id !== undefined) {
+        if (parent_id === 'null' || parent_id === '') {
+          query += ` AND parent_id IS NULL`;
+        } else {
+          query += ` AND parent_id = $${params.length + 1}`;
+          params.push(parent_id as string);
+        }
+      }
 
-    res.json(documents);
+      query += ` ORDER BY position ASC, created_at DESC`;
+
+      const result = await pool.query(query, params);
+
+      // Extract properties into flat fields for backwards compatibility.
+      // Summary lists skip JSONB payloads for navigation-heavy views such as wiki sidebars.
+      const documents = result.rows.map(row => {
+        const props = row.properties || {};
+        return {
+          ...row,
+          // Flatten common properties for backwards compatibility
+          state: props.state,
+          priority: props.priority,
+          estimate: props.estimate,
+          assignee_id: props.assignee_id,
+          source: props.source,
+          prefix: props.prefix,
+          color: props.color,
+        };
+      });
+
+      return JSON.stringify(documents);
+    };
+
+    const bodyPromise = loadDocumentsList();
+    if (cacheKey) {
+      summaryListInFlight.set(cacheKey, bodyPromise);
+    }
+
+    let body: string;
+    try {
+      body = await bodyPromise;
+    } finally {
+      if (cacheKey) {
+        summaryListInFlight.delete(cacheKey);
+      }
+    }
+
+    if (cacheKey) {
+      summaryListCache.set(cacheKey, { expiresAt: Date.now() + SUMMARY_LIST_CACHE_TTL_MS, body });
+    }
+
+    res.type('application/json').send(body);
   } catch (err) {
     console.error('List documents error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -432,21 +493,24 @@ router.patch('/:id/content', authMiddleware, async (req: Request, res: Response)
     const workspaceId = String(req.workspaceId);
 
     // Validate content structure
-    const { content } = req.body;
-    if (!content || typeof content !== 'object') {
+    const { content: rawContent } = req.body;
+    if (!rawContent || typeof rawContent !== 'object') {
       res.status(400).json({ error: 'Content is required and must be a valid TipTap JSON object' });
       return;
     }
 
     // Validate TipTap JSON structure
-    if (content.type !== 'doc' || !Array.isArray(content.content)) {
+    if (rawContent.type !== 'doc' || !Array.isArray(rawContent.content)) {
       res.status(400).json({
         error: 'Invalid content structure. Content must be a TipTap document with type "doc" and a content array.',
         expected: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: '...' }] }] },
-        received: { type: content.type, hasContentArray: Array.isArray(content.content) },
+        received: { type: rawContent.type, hasContentArray: Array.isArray(rawContent.content) },
       });
       return;
     }
+
+    // Strip HTML tags from plain-text nodes (code blocks preserved) before storage.
+    const content = sanitizeTipTapContent(rawContent);
 
     // Verify document exists and user can access it
     const { canAccess, doc: existing } = await canAccessDocument(id, userId, workspaceId);
@@ -489,6 +553,7 @@ router.patch('/:id/content', authMiddleware, async (req: Request, res: Response)
 
     // Invalidate collaboration cache so connected clients get fresh content
     invalidateDocumentCache(id);
+    clearSummaryListCache(workspaceId);
 
     res.json({
       id: result.rows[0].id,
@@ -511,7 +576,11 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
-    const { title, document_type, parent_id, program_id, sprint_id, properties, content, belongs_to } = parsed.data;
+    const { title: rawTitle, document_type, parent_id, program_id, sprint_id, properties, content: rawContent, belongs_to } = parsed.data;
+    // Strip HTML tags from the title and plain-text content nodes (defense-in-depth
+    // on top of React/TipTap output encoding; code blocks are preserved).
+    const title = sanitizeTitle(rawTitle);
+    const content = rawContent ? sanitizeTipTapContent(rawContent) : rawContent;
     let { visibility } = parsed.data;
 
     // If parent_id is provided and visibility is not specified, inherit from parent
@@ -572,6 +641,7 @@ router.post('/', authMiddleware, async (req: Request, res: Response) => {
     }
 
     await client.query('COMMIT');
+    clearSummaryListCache(req.workspaceId);
 
     // Broadcast accountability update for document types that affect action items
     // Sprint plans clear the "write sprint plan" action item
@@ -597,6 +667,12 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     const id = String(req.params.id);
     const userId = String(req.userId);
     const workspaceId = String(req.workspaceId);
+
+    const parsedId = uuidParamSchema.safeParse(id);
+    if (!parsedId.success) {
+      res.status(400).json({ error: 'Invalid document id' });
+      return;
+    }
 
     const parsed = updateDocumentSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1016,6 +1092,7 @@ router.patch('/:id', authMiddleware, async (req: Request, res: Response) => {
     }
 
     await client.query('COMMIT');
+    clearSummaryListCache(workspaceId);
 
     // Post-commit operations (non-transactional)
 
@@ -1128,6 +1205,7 @@ router.delete('/:id', authMiddleware, async (req: Request, res: Response) => {
       return;
     }
 
+    clearSummaryListCache(workspaceId);
     res.status(204).send();
   } catch (err) {
     console.error('Delete document error:', err);

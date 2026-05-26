@@ -171,14 +171,14 @@ export function LoginPage() {
 
   if (isCheckingSetup) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <main id="main-content" className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-muted">Loading...</div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <main id="main-content" className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-[360px]">
         {/* Logo / Brand */}
         <div className="mb-8 text-center">
@@ -367,6 +367,6 @@ export function LoginPage() {
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }

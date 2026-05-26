@@ -203,7 +203,7 @@ export async function transformIssueLinks(
   content: unknown,
   workspaceId: string,
   preloadedIssueMap?: Map<number, IssueInfo>
-): Promise<unknown> {
+): Promise<any> {
   if (!content || typeof content !== 'object') return content;
 
   const doc = content as TipTapDoc;

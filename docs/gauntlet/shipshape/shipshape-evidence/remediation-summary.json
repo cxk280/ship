@@ -1,0 +1,106 @@
+{
+  "date": "2026-05-24",
+  "node_runtime_for_verification": "/Users/christopherking/.nvm/versions/node/v23.3.0/bin",
+  "type_safety": {
+    "baseline_core_violations": 1281,
+    "current_core_violations": 949,
+    "reduction": 332,
+    "reduction_percent": 25.92,
+    "gate": "Kickoff: eliminate 25% of type-safety violations",
+    "status": "passed"
+  },
+  "changed_line_coverage": {
+    "threshold_percent_per_file": 80,
+    "covered_changed_executable_lines": 423,
+    "total_changed_executable_lines": 423,
+    "coverage_percent": 100.0,
+    "status": "passed",
+    "explicit_exclusions": [
+      {
+        "file": "api/src/index.ts",
+        "reason": "application bootstrap"
+      },
+      {
+        "file": "web/src/main.tsx",
+        "reason": "application bootstrap"
+      },
+      {
+        "file": "web/src/pages/App.tsx",
+        "reason": "application shell"
+      },
+      {
+        "file": "web/src/contexts/DocumentsContext.tsx",
+        "reason": "type-only compatibility context contract; behavior covered by hook/page tests"
+      },
+      {
+        "files": [
+          "api/src/collaboration/index.ts",
+          "api/src/routes/admin-credentials.ts"
+        ],
+        "reason": "security-probe-covered WebSocket and CSP changes"
+      },
+      {
+        "files": [
+          "web/src/components/document-tabs/ProgramOverviewTab.tsx",
+          "web/src/components/StatusOverviewHeatmap.tsx",
+          "web/src/pages/Login.tsx",
+          "web/src/pages/MyWeekPage.tsx",
+          "web/src/pages/TeamMode.tsx"
+        ],
+        "reason": "accessibility and visual contrast changes covered by Playwright axe stretch spec"
+      }
+    ]
+  },
+  "package_coverage_ratchet": {
+    "api": {
+      "lines": 41.25,
+      "statements": 41.07,
+      "branches": 34.27,
+      "functions": 41.41,
+      "minimums": {
+        "lines": 40,
+        "statements": 40,
+        "branches": 33,
+        "functions": 40
+      }
+    },
+    "web": {
+      "lines": 28.1,
+      "statements": 27.21,
+      "branches": 16.6,
+      "functions": 22.48,
+      "minimums": {
+        "lines": 28,
+        "statements": 27,
+        "branches": 16,
+        "functions": 22
+      }
+    },
+    "status": "passed"
+  },
+  "runtime_error_handling": {
+    "counted_user_facing_fixes": [
+      "Invalid document UUID returns 400 before PostgreSQL",
+      "Documents page shows retryable error state instead of a blank list",
+      "Backlinks panel stays quiet and stops polling while offline"
+    ],
+    "diagnostic_not_counted_as_user_facing": [
+      "process-level unhandled rejection and uncaught exception logging"
+    ],
+    "status": "passed"
+  },
+  "cache_correctness": {
+    "summary_list_cache_ttl_ms": 10000,
+    "session_validation_cache_ttl_ms": 5000,
+    "documented_tradeoffs": true,
+    "tests": [
+      "api/src/routes/documents.test.ts verifies cached wiki summary lists are invalidated after creating a document"
+    ],
+    "status": "passed"
+  },
+  "verification_commands": [
+    "pnpm build:web",
+    "DATABASE_URL=postgres://ship:ship_dev_password@127.0.0.1:5433/ship_dev pnpm test:coverage:changed",
+    "node scripts/check-changed-coverage.mjs && node scripts/check-coverage-ratchet.mjs"
+  ]
+}
