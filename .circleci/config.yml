@@ -56,6 +56,9 @@ jobs:
         environment:
           NODE_ENV: test
           FLEETGRAPH_DISABLE_LLM: "1"
+          # Tests run the graph (incl. runDigest) with the LLM disabled; keep their traces out
+          # of LangSmith so the fleetgraph project isn't polluted with CI noise.
+          LANGCHAIN_TRACING_V2: "false"
           DATABASE_URL: postgresql://postgres@localhost:5432/ship_test
       - image: cimg/postgres:16.4
         environment:
