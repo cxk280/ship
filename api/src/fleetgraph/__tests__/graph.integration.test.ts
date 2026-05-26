@@ -5,6 +5,8 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'crypto';
 import { pool } from '../../db/client.js';
 import { runProactiveForEntity, runDigest, resumeApproval } from '../runner.js';
+import { fetchIssues } from '../fetch.js';
+import type { Scope } from '../types.js';
 
 process.env.FLEETGRAPH_DISABLE_LLM = '1';
 
@@ -120,5 +122,41 @@ describe('FleetGraph graph integration', () => {
     await runDigest(WS); // same day → dedup, no new digest
     const c2 = (await pool.query(`SELECT count(*)::int n FROM fleetgraph_findings WHERE workspace_id=$1 AND finding_type='digest'`, [WS])).rows[0].n;
     expect(c2).toBe(1);
+  });
+
+  it('on-demand scoping: fetchIssues narrows by project / program / assignee (everything-is-a-document)', async () => {
+    const mkDoc = async (type: string, title: string) =>
+      (await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, properties, content, visibility)
+         VALUES ($1,$2,$3,'{}','{}','workspace') RETURNING id`,
+        [WS, type, title],
+      )).rows[0].id;
+    const projA = await mkDoc('project', 'Proj A');
+    const projB = await mkDoc('project', 'Proj B');
+    const prog = await mkDoc('program', 'Prog 1');
+    const OTHER = (await pool.query(
+      `INSERT INTO users (email, password_hash, name) VALUES ($1,'h','Other') RETURNING id`,
+      [`fg-${randomUUID()}@t.local`],
+    )).rows[0].id;
+
+    const issueA = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: USER, estimate: 3 }, 'A');
+    const issueB = await insertIssue({ state: 'todo', priority: 'medium', assignee_id: OTHER, estimate: 3 }, 'B');
+    await pool.query(
+      `INSERT INTO document_associations (document_id, related_id, relationship_type)
+       VALUES ($1,$2,'project'),($3,$4,'project'),($1,$5,'program')`,
+      [issueA, projA, issueB, projB, prog],
+    );
+
+    const ids = async (scope: Scope) => (await fetchIssues(WS, scope)).map((i) => i.id).sort();
+
+    expect(await ids({ projectId: projA })).toEqual([issueA]);
+    expect(await ids({ projectId: projB })).toEqual([issueB]);
+    expect(await ids({ programId: prog })).toEqual([issueA]);
+    expect(await ids({ assigneeId: USER })).toEqual([issueA]);
+    expect(await ids({ assigneeId: OTHER })).toEqual([issueB]);
+
+    // cleanup the program doc (beforeEach only wipes issue/project docs)
+    await pool.query(`DELETE FROM document_associations WHERE related_id=$1`, [prog]);
+    await pool.query(`DELETE FROM documents WHERE id=$1`, [prog]);
   });
 });

@@ -9,7 +9,7 @@ import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { FleetGraphState, type FleetGraphStateType } from './state.js';
 import {
   fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
-  fetchWorkspaceMeta, fetchSprintProgress,
+  fetchWorkspaceMeta, fetchSprintProgress, fetchPersonUserId,
   type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta, type ProjectRow,
 } from './fetch.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
@@ -34,15 +34,28 @@ async function prepare(state: S): Promise<Update> {
   return { knownFindings: known, raw: { admins, dismissals } };
 }
 
+// Everything in Ship is a document, so the chat scopes to whatever document the user is viewing.
+// Each doc type narrows the issues the agent reasons over (issue→that issue, sprint/project/program
+// →their issues, person→their assigned work). Unhandled types fall back to workspace-wide.
 async function resolveContext(state: S): Promise<Update> {
   const { documentType, documentId } = state.scope;
-  if (documentType === 'issue' && documentId) {
-    return { scope: { ...state.scope, entityIds: [documentId] } };
+  if (!documentId) return {};
+  switch (documentType) {
+    case 'issue':
+      return { scope: { ...state.scope, entityIds: [documentId] } };
+    case 'sprint':
+      return { scope: { ...state.scope, sprintId: documentId } };
+    case 'project':
+      return { scope: { ...state.scope, projectId: documentId } };
+    case 'program':
+      return { scope: { ...state.scope, programId: documentId } };
+    case 'person': {
+      const userId = await fetchPersonUserId(documentId);
+      return userId ? { scope: { ...state.scope, assigneeId: userId } } : {};
+    }
+    default:
+      return {};
   }
-  if (documentType === 'sprint' && documentId) {
-    return { scope: { ...state.scope, sprintId: documentId } };
-  }
-  return {};
 }
 
 // ---------------------------------------------------------------- parallel fetch
@@ -195,7 +208,7 @@ Respond ONLY with JSON: {"reply":"<answer>","action":{"kind":"...","entityId":"<
 Example: {"reply":"Reassigning to Alice.","action":{"kind":"reassign","entityId":"3f...","payload":{"assignee_id":"6e..."},"summary":"Reassign #12 to Alice"}}`;
   const user = `Scope: ${JSON.stringify(state.scope)}
 Issues in scope: ${JSON.stringify(issues.slice(0, 60).map((i) => ({ id: i.id, num: i.ticketNumber, title: i.title, state: i.state, priority: i.priority, assignee: i.assigneeName, assigneeId: i.assigneeId, estimate: i.estimate, due: i.dueDate })))}
-Team: ${JSON.stringify(team.map((t) => ({ name: t.name, userId: t.userId })))}
+Team: ${JSON.stringify(team.map((t) => ({ name: t.name, userId: t.userId, role: t.role, capacityHours: t.capacityHours })))}
 Weeks: ${JSON.stringify(weeks)}
 
 User: ${question}`;
