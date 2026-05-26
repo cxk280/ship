@@ -5,7 +5,7 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'crypto';
 import { pool } from '../../db/client.js';
 import { runProactiveForEntity, runDigest, resumeApproval } from '../runner.js';
-import { fetchIssues } from '../fetch.js';
+import { fetchIssues, fetchDocumentCensus, fetchDocumentIndex } from '../fetch.js';
 import type { Scope } from '../types.js';
 
 process.env.FLEETGRAPH_DISABLE_LLM = '1';
@@ -158,5 +158,36 @@ describe('FleetGraph graph integration', () => {
     // cleanup the program doc (beforeEach only wipes issue/project docs)
     await pool.query(`DELETE FROM document_associations WHERE related_id=$1`, [prog]);
     await pool.query(`DELETE FROM documents WHERE id=$1`, [prog]);
+  });
+
+  it('document census + index cover all document types (everything-is-a-document)', async () => {
+    const mkDoc = async (type: string, title: string) =>
+      (await pool.query(
+        `INSERT INTO documents (workspace_id, document_type, title, properties, content, visibility)
+         VALUES ($1,$2,$3,'{}','{}','workspace') RETURNING id`,
+        [WS, type, title],
+      )).rows[0].id;
+    await insertIssue({ state: 'todo', priority: 'medium' }, 'Census Issue');
+    const proj = await mkDoc('project', 'Census Project');
+    const wiki = await mkDoc('wiki', 'Census Wiki');
+    // a 'person' doc (Tester) already exists from beforeAll
+
+    const census = await fetchDocumentCensus(WS);
+    expect(census.byType.issue).toBeGreaterThanOrEqual(1);
+    expect(census.byType.project).toBeGreaterThanOrEqual(1);
+    expect(census.byType.wiki).toBeGreaterThanOrEqual(1);
+    expect(census.byType.person).toBeGreaterThanOrEqual(1);
+    // total is the sum of the per-type counts
+    expect(census.total).toBe(Object.values(census.byType).reduce((a, b) => a + b, 0));
+
+    const index = await fetchDocumentIndex(WS);
+    const titles = index.map((d) => d.title);
+    expect(titles).toContain('Census Wiki');
+    expect(titles).toContain('Census Project');
+    expect(index.find((d) => d.title === 'Census Wiki')?.type).toBe('wiki');
+
+    // cleanup the wiki (beforeEach only wipes issue/project docs); proj is cleaned by beforeEach
+    await pool.query(`DELETE FROM documents WHERE id=$1`, [wiki]);
+    void proj;
   });
 });

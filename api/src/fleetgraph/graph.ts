@@ -9,8 +9,8 @@ import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { FleetGraphState, type FleetGraphStateType } from './state.js';
 import {
   fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
-  fetchWorkspaceMeta, fetchSprintProgress, fetchPersonUserId,
-  type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta, type ProjectRow,
+  fetchWorkspaceMeta, fetchSprintProgress, fetchPersonUserId, fetchDocumentCensus, fetchDocumentIndex,
+  type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta, type ProjectRow, type DocumentCensus, type DocIndexEntry,
 } from './fetch.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
@@ -72,11 +72,13 @@ async function nodeFetchProjects(state: S): Promise<Update> {
   return { raw: { projects: await fetchProjects(state.workspaceId) } };
 }
 async function nodeFetchMeta(state: S): Promise<Update> {
-  const [meta, sprintProgress] = await Promise.all([
+  const [meta, sprintProgress, census, docIndex] = await Promise.all([
     fetchWorkspaceMeta(state.workspaceId),
     fetchSprintProgress(state.workspaceId),
+    fetchDocumentCensus(state.workspaceId),
+    fetchDocumentIndex(state.workspaceId),
   ]);
-  return { raw: { meta, sprintProgress } };
+  return { raw: { meta, sprintProgress, census, docIndex } };
 }
 function merge(_state: S): Update {
   return {}; // fan-in join; the `raw` reducer already merged the four fetches
@@ -192,11 +194,14 @@ async function answer(state: S): Promise<Update> {
   const issues = (state.raw.issues as IssueRow[]) ?? [];
   const team = (state.raw.team as PersonRow[]) ?? [];
   const weeks = state.raw.weeks ?? [];
+  const census = state.raw.census as DocumentCensus | undefined;
+  const docIndex = (state.raw.docIndex as DocIndexEntry[] | undefined) ?? [];
   const question = state.userMessage ?? '';
   if (!isLlmAvailable()) {
-    return { answer: `FleetGraph (offline reasoning): ${issues.length} open issue(s) in scope. Enable a model for full answers. Your question: "${question}"` };
+    return { answer: `FleetGraph (offline reasoning): ${census?.total ?? 0} document(s) in the workspace, ${issues.length} open issue(s) in scope. Enable a model for full answers. Your question: "${question}"` };
   }
   const sys = `You are FleetGraph, embedded in the Ship project tool. Answer the user's question about the CURRENT view using only the provided data; be concise and concrete.
+Everything in Ship is a document. For COUNTS (how many documents/issues/projects/people/etc.) use "Workspace documents (counts)". To NAME or LIST documents of any type (wikis, projects, sprints, people, programs) or to check whether a document about a topic exists, use "Workspace documents (index)".
 If — and only if — the user clearly requests a change to a specific issue, include ONE concrete "action". "entityId" is the issue's "id" from Issues in scope; NEVER invent ids. Do NOT claim to have made the change — it needs the user's approval.
 The "payload" MUST match the kind exactly:
 - reassign      -> {"assignee_id":"<userId from Team>"}
@@ -210,6 +215,8 @@ Example: {"reply":"Reassigning to Alice.","action":{"kind":"reassign","entityId"
 Issues in scope: ${JSON.stringify(issues.slice(0, 60).map((i) => ({ id: i.id, num: i.ticketNumber, title: i.title, state: i.state, priority: i.priority, assignee: i.assigneeName, assigneeId: i.assigneeId, estimate: i.estimate, due: i.dueDate })))}
 Team: ${JSON.stringify(team.map((t) => ({ name: t.name, userId: t.userId, role: t.role, capacityHours: t.capacityHours })))}
 Weeks: ${JSON.stringify(weeks)}
+Workspace documents (counts): ${JSON.stringify(census ?? { total: 0, byType: {} })}
+Workspace documents (index): ${JSON.stringify(docIndex.map((d) => ({ type: d.type, title: d.title })))}
 
 User: ${question}`;
   const res = await invokeTier(2, sys, user);

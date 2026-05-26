@@ -116,6 +116,48 @@ export async function fetchPersonUserId(personDocId: string): Promise<string | n
   return r.rows[0]?.user_id || null;
 }
 
+export interface DocumentCensus {
+  total: number;
+  byType: Record<string, number>;
+}
+
+/** Workspace-wide document counts (total + per type) — lets the chat answer landscape questions
+ *  like "how many documents are there?" that the issue-only fetch can't. */
+export async function fetchDocumentCensus(workspaceId: string): Promise<DocumentCensus> {
+  const r = await pool.query(
+    `SELECT document_type, COUNT(*)::int AS n FROM documents
+     WHERE workspace_id = $1 AND deleted_at IS NULL AND archived_at IS NULL
+     GROUP BY document_type`,
+    [workspaceId],
+  );
+  const byType: Record<string, number> = {};
+  let total = 0;
+  for (const row of r.rows) {
+    byType[row.document_type] = row.n;
+    total += row.n;
+  }
+  return { total, byType };
+}
+
+export interface DocIndexEntry {
+  id: string;
+  type: string;
+  title: string;
+}
+
+/** A lightweight title+type directory of the workspace's documents (capped, most-recent first) —
+ *  lets the chat list/name documents of any type and answer "is there a doc about X?". */
+export async function fetchDocumentIndex(workspaceId: string, limit = 200): Promise<DocIndexEntry[]> {
+  const r = await pool.query(
+    `SELECT id, document_type, title FROM documents
+     WHERE workspace_id = $1 AND deleted_at IS NULL AND archived_at IS NULL
+     ORDER BY updated_at DESC NULLS LAST
+     LIMIT $2`,
+    [workspaceId, limit],
+  );
+  return r.rows.map((x) => ({ id: x.id, type: x.document_type, title: x.title || 'Untitled' }));
+}
+
 export interface WeekRow {
   id: string;
   title: string;
