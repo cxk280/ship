@@ -2,8 +2,10 @@ version: 2.1
 
 # CI + CD for Ship (the FleetGraph agent runs in-process inside the Ship API, so the single
 # Railway deploy ships both the app and the agent).
-# Secrets come from the CircleCI "fleetgraph" context:
-#   ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2, LANGCHAIN_PROJECT, RAILWAY_TOKEN
+# Secrets come from the `ship` project's Environment Variables (Project Settings → Environment
+# Variables), so every job sees them without a context:
+#   RAILWAY_TOKEN (required for deploy); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY,
+#   LANGCHAIN_TRACING_V2, LANGCHAIN_PROJECT (optional — let the LLM evals run instead of skip).
 
 commands:
   setup_node:
@@ -96,19 +98,14 @@ jobs:
 workflows:
   build-test-deploy:
     jobs:
-      - install_build:
-          context: fleetgraph
+      - install_build
       - eval_deterministic:
-          context: fleetgraph
           requires: [install_build]
       - test_integration:
-          context: fleetgraph
           requires: [install_build]
       - eval_llm:
-          context: fleetgraph
           requires: [install_build]
       - deploy:
-          context: fleetgraph
           requires: [install_build, eval_deterministic, test_integration, eval_llm]
           filters:
             branches:
