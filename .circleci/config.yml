@@ -10,8 +10,8 @@ commands:
     steps:
       - checkout
       - run:
-          name: Enable pnpm
-          command: sudo corepack enable && corepack prepare pnpm@10.27.0 --activate
+          name: Install pnpm
+          command: sudo npm install -g pnpm@10.27.0
       - restore_cache:
           keys:
             - pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
