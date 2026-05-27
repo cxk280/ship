@@ -133,22 +133,29 @@ function dedup(state: S): Update {
 async function triage(state: S): Promise<Update> {
   const signals = state.novelSignals;
   if (signals.length === 0) return { keptSignals: [] };
+  // High-severity signals (overdue / stalled / overloaded) are NEVER triaged away — a cheap Tier-1
+  // model must not be able to drop a critical. We keep them by construction and let the model prune
+  // only lower-severity noise. (This makes the "criticals survive triage" invariant deterministic
+  // instead of hoping the model complies — the source of the eval's flakiness.)
+  const critical = signals.filter((s) => s.severity === 'high');
+  const candidates = signals.filter((s) => s.severity !== 'high');
+  if (candidates.length === 0) return { keptSignals: critical };
   if (!isLlmAvailable()) return { keptSignals: signals };
-  // Triage by 1-based INDEX, not dedupKey: the keys carry UUIDs the Tier-1 model can't echo back
-  // reliably, which made the returned "keep" list never match → every signal dropped (kept=0).
+  // Triage candidates by 1-based INDEX, not dedupKey: the keys carry UUIDs the Tier-1 model can't
+  // echo back reliably, which made the returned "keep" list never match → every signal dropped.
   // Fail OPEN — triage is a light noise filter, not a gate; if the response is empty/unusable,
   // surface everything (dedup + adaptive suppression handle repeat noise downstream).
   const sys = `You are FleetGraph's triage step for a project-management tool. Given a numbered list of candidate signals about issues, list the INDICES worth a human's attention now; drop only true noise. Respond ONLY with JSON: {"keep":[<index>, ...]}. When in doubt, keep it.`;
-  const user = `Signals:\n${signals.map((s, i) => `${i + 1}. [${s.severity}] ${s.type} — ${s.entityLabel}: ${JSON.stringify(s.evidence)}`).join('\n')}`;
+  const user = `Signals:\n${candidates.map((s, i) => `${i + 1}. [${s.severity}] ${s.type} — ${s.entityLabel}: ${JSON.stringify(s.evidence)}`).join('\n')}`;
   const res = await invokeTier(1, sys, user);
-  if (!res) return { keptSignals: signals };
+  if (!res) return { keptSignals: signals }; // fail open: keep everything
   const parsed = extractJson<{ keep: Array<number | string> }>(res.text);
   const idxs = (parsed?.keep ?? [])
     .map((n) => Number(n) - 1)
-    .filter((n) => Number.isInteger(n) && n >= 0 && n < signals.length);
-  const kept = idxs.length ? signals.filter((_, i) => idxs.includes(i)) : signals; // fail open
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < candidates.length);
+  const keptCandidates = idxs.length ? candidates.filter((_, i) => idxs.includes(i)) : candidates; // fail open
   return {
-    keptSignals: kept,
+    keptSignals: [...critical, ...keptCandidates],
     cost: { tier1Tokens: res.inputTokens + res.outputTokens, tier2Tokens: 0, usd: res.usd },
   };
 }
