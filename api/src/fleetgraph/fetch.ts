@@ -90,7 +90,8 @@ export async function fetchTeam(workspaceId: string): Promise<PersonRow[]> {
   const result = await pool.query(
     `SELECT id, title, properties FROM documents
      WHERE workspace_id = $1 AND document_type = 'person'
-       AND deleted_at IS NULL AND archived_at IS NULL`,
+       AND deleted_at IS NULL AND archived_at IS NULL
+     LIMIT 200`,
     [workspaceId],
   );
   return result.rows.map((r) => {
@@ -106,12 +107,13 @@ export async function fetchTeam(workspaceId: string): Promise<PersonRow[]> {
   });
 }
 
-/** Resolve a person document's linked user id (issues are assigned by user id, not person-doc id). */
-export async function fetchPersonUserId(personDocId: string): Promise<string | null> {
+/** Resolve a person document's linked user id (issues are assigned by user id, not person-doc id).
+ *  Scoped to the workspace so a chat scope can't reference a person doc in another tenant. */
+export async function fetchPersonUserId(workspaceId: string, personDocId: string): Promise<string | null> {
   const r = await pool.query(
     `SELECT properties->>'user_id' AS user_id FROM documents
-     WHERE id = $1 AND document_type = 'person'`,
-    [personDocId],
+     WHERE id = $1 AND workspace_id = $2 AND document_type = 'person'`,
+    [personDocId, workspaceId],
   );
   return r.rows[0]?.user_id || null;
 }
