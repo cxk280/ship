@@ -173,6 +173,28 @@ export async function upsertPendingApproval(params: {
   return { created: result.rows[0].created === true, id: result.rows[0].id };
 }
 
+/** Atomically claim a pending approval (pending → processing) so a double-submit can't resume the
+ *  same HITL run twice (which would double-apply the mutation + duplicate the audit/notify). Returns
+ *  false if it wasn't pending (already claimed/resolved). Scoped to the workspace. */
+export async function claimPendingApproval(threadId: string, workspaceId: string): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE fleetgraph_pending_approvals SET status = 'processing'
+      WHERE thread_id = $1 AND workspace_id = $2 AND status = 'pending'
+      RETURNING id`,
+    [threadId, workspaceId],
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/** Release a claim (processing → pending) so the user can retry if resuming the graph failed. */
+export async function revertPendingApprovalClaim(threadId: string): Promise<void> {
+  await pool.query(
+    `UPDATE fleetgraph_pending_approvals SET status = 'pending'
+      WHERE thread_id = $1 AND status = 'processing'`,
+    [threadId],
+  );
+}
+
 export async function resolvePendingApproval(threadId: string, status: string): Promise<void> {
   await pool.query(
     `UPDATE fleetgraph_pending_approvals SET status = $2, resolved_at = now() WHERE thread_id = $1`,

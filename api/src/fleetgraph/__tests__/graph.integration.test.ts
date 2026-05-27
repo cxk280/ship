@@ -5,7 +5,8 @@ import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'crypto';
 import { pool } from '../../db/client.js';
 import { runProactiveForEntity, runDigest, resumeApproval } from '../runner.js';
-import { fetchIssues, fetchDocumentCensus, fetchDocumentIndex } from '../fetch.js';
+import { fetchIssues, fetchDocumentCensus, fetchDocumentIndex, fetchPersonUserId } from '../fetch.js';
+import { claimPendingApproval, revertPendingApprovalClaim } from '../findings-store.js';
 import type { Scope } from '../types.js';
 
 process.env.FLEETGRAPH_DISABLE_LLM = '1';
@@ -203,5 +204,28 @@ describe('FleetGraph graph integration', () => {
     // cleanup the wiki (beforeEach only wipes issue/project docs); proj is cleaned by beforeEach
     await pool.query(`DELETE FROM documents WHERE id=$1`, [wiki]);
     void proj;
+  });
+
+  it('fetchPersonUserId is workspace-scoped (no cross-tenant person lookup)', async () => {
+    expect(await fetchPersonUserId(WS, PERSON)).toBe(USER);
+    // A person doc must not resolve for a different workspace, even with the right doc id.
+    expect(await fetchPersonUserId(randomUUID(), PERSON)).toBeNull();
+  });
+
+  it('claimPendingApproval is atomic: a double-submit can only claim once', async () => {
+    const threadId = `test:${randomUUID()}`;
+    await pool.query(
+      `INSERT INTO fleetgraph_pending_approvals (workspace_id, thread_id, summary, status)
+       VALUES ($1,$2,'test','pending')`,
+      [WS, threadId],
+    );
+    expect(await claimPendingApproval(threadId, WS)).toBe(true);
+    expect(await claimPendingApproval(threadId, WS)).toBe(false); // already processing → no double-resume
+    // a failed resume releases the claim so the human can retry
+    await revertPendingApprovalClaim(threadId);
+    expect(await claimPendingApproval(threadId, WS)).toBe(true);
+    // a different workspace can't claim it
+    await revertPendingApprovalClaim(threadId);
+    expect(await claimPendingApproval(threadId, randomUUID())).toBe(false);
   });
 });

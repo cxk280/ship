@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { authMiddleware } from '../middleware/auth.js';
-import { listFindings, listPendingApprovals, getPendingApproval, setFindingStatusById } from '../fleetgraph/findings-store.js';
+import { listFindings, listPendingApprovals, getPendingApproval, setFindingStatusById, claimPendingApproval, revertPendingApprovalClaim } from '../fleetgraph/findings-store.js';
 import { runOndemandChat, resumeApproval } from '../fleetgraph/runner.js';
 import type { Scope } from '../fleetgraph/types.js';
 
@@ -85,11 +85,26 @@ fleetgraphRouter.post('/approvals/:threadId/resume', authMiddleware, async (req:
       return;
     }
 
+    // Atomically claim the approval (pending → processing) so a double-submit / concurrent request
+    // can't resume the same HITL run twice and double-apply the mutation.
+    const claimed = await claimPendingApproval(threadId, req.workspaceId!);
+    if (!claimed) {
+      res.status(409).json({ error: 'Approval already being processed' });
+      return;
+    }
+
     const snoozeUntil = parsed.data.decision === 'snooze'
       ? new Date(Date.now() + (parsed.data.snoozeDays ?? 7) * 86_400_000).toISOString()
       : null;
 
-    await resumeApproval({ threadId, decision: parsed.data.decision, snoozeUntil, userId: req.userId! });
+    try {
+      await resumeApproval({ threadId, decision: parsed.data.decision, snoozeUntil, userId: req.userId! });
+    } catch (err) {
+      // Resuming the graph failed before it could record a terminal decision — release the claim so
+      // the human can retry instead of leaving the approval stuck.
+      await revertPendingApprovalClaim(threadId).catch(() => {});
+      throw err;
+    }
     res.json({ success: true, decision: parsed.data.decision });
   } catch (err) {
     console.error('FleetGraph resume error:', err);
@@ -105,6 +120,10 @@ const findingResolveSchema = z.object({
 fleetgraphRouter.post('/findings/:id/resolve', authMiddleware, async (req: Request, res: Response) => {
   try {
     const id = String(req.params.id);
+    if (!z.string().uuid().safeParse(id).success) {
+      res.status(404).json({ error: 'Finding not found' });
+      return;
+    }
     const parsed = findingResolveSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: 'Invalid input', details: parsed.error.errors });

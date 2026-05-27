@@ -50,7 +50,7 @@ async function resolveContext(state: S): Promise<Update> {
     case 'program':
       return { scope: { ...state.scope, programId: documentId } };
     case 'person': {
-      const userId = await fetchPersonUserId(documentId);
+      const userId = await fetchPersonUserId(state.workspaceId, documentId);
       return userId ? { scope: { ...state.scope, assigneeId: userId } } : {};
     }
     default:
@@ -210,6 +210,41 @@ async function reason(state: S): Promise<Update> {
 
 // ---------------------------------------------------------------- on-demand answer (tier 2)
 const CHAT_ACTION_KINDS = new Set(['set_state', 'set_priority', 'reassign', 'set_estimate', 'set_due_date']);
+export const VALID_STATES = new Set(['triage', 'backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']);
+export const VALID_PRIORITIES = new Set(['urgent', 'high', 'medium', 'low', 'none']);
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_ESTIMATE = 10_000;
+
+/** Validate an LLM-proposed chat action payload at the trust boundary before it can become a
+ *  HITL action that writes to documents.properties. The model is steered by untrusted content
+ *  (issue titles, the user's message), so enforce enum/format/bounds rather than trusting it to
+ *  emit only the values the prompt lists. `validAssigneeIds` = the team's user ids in scope. */
+export function isValidChatActionPayload(
+  kind: string,
+  payload: Record<string, unknown>,
+  validAssigneeIds: Set<string>,
+): boolean {
+  switch (kind) {
+    case 'reassign':
+      return typeof payload.assignee_id === 'string' && validAssigneeIds.has(payload.assignee_id);
+    case 'set_state':
+      return typeof payload.state === 'string' && VALID_STATES.has(payload.state);
+    case 'set_priority':
+      return typeof payload.priority === 'string' && VALID_PRIORITIES.has(payload.priority);
+    case 'set_estimate': {
+      const n = Number(payload.estimate);
+      return Number.isFinite(n) && n >= 0 && n <= MAX_ESTIMATE;
+    }
+    case 'set_due_date': {
+      if (typeof payload.due_date !== 'string' || !ISO_DATE.test(payload.due_date)) return false;
+      const t = Date.parse(`${payload.due_date}T00:00:00Z`);
+      // Round-trip rejects rolled-over nonsense like 2026-02-30 / 2026-13-01.
+      return !Number.isNaN(t) && new Date(t).toISOString().slice(0, 10) === payload.due_date;
+    }
+    default:
+      return false;
+  }
+}
 
 async function answer(state: S): Promise<Update> {
   const issues = (state.raw.issues as IssueRow[]) ?? [];
@@ -256,18 +291,8 @@ User: ${question}`;
   const reply = parsed.reply ?? res.text;
   const a = parsed.action;
   const validIssueIds = new Set(issues.map((i) => i.id));
-  const teamUserIds = new Set(team.map((t) => t.userId).filter(Boolean));
-  const payloadOk = (kind: string, p: Record<string, unknown>): boolean => {
-    switch (kind) {
-      case 'reassign': return typeof p.assignee_id === 'string' && teamUserIds.has(p.assignee_id as string);
-      case 'set_state': return typeof p.state === 'string';
-      case 'set_priority': return typeof p.priority === 'string';
-      case 'set_estimate': return Number.isFinite(Number(p.estimate));
-      case 'set_due_date': return typeof p.due_date === 'string';
-      default: return false;
-    }
-  };
-  if (a && CHAT_ACTION_KINDS.has(a.kind) && validIssueIds.has(a.entityId) && payloadOk(a.kind, a.payload ?? {})) {
+  const teamUserIds = new Set(team.map((t) => t.userId).filter((x): x is string => !!x));
+  if (a && CHAT_ACTION_KINDS.has(a.kind) && validIssueIds.has(a.entityId) && isValidChatActionPayload(a.kind, a.payload ?? {}, teamUserIds)) {
     const action: ProposedAction = {
       kind: a.kind as ProposedAction['kind'],
       entityId: a.entityId,
