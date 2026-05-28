@@ -7,7 +7,7 @@ version: 2.1
 #   are scoped to one environment); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2,
 #   LANGCHAIN_PROJECT (optional — let the LLM evals run instead of skip).
 # Railway environments:
-#   dev: auto-deploys from main after CI is green.
+#   dev: auto-deploys from master after CI is green.
 #   staging: manual approval after dev deploy.
 #   production: manual approval after staging deploy.
 
@@ -130,13 +130,13 @@ workflows:
           requires: [install_build, eval_deterministic, test_integration, eval_llm]
           filters:
             branches:
-              only: main
+              only: master
       - hold_staging:
           type: approval
           requires: [deploy_dev]
           filters:
             branches:
-              only: main
+              only: master
       - deploy_railway:
           name: deploy_staging
           railway_environment: staging
@@ -144,13 +144,13 @@ workflows:
           requires: [hold_staging]
           filters:
             branches:
-              only: main
+              only: master
       - hold_prod:
           type: approval
           requires: [deploy_staging]
           filters:
             branches:
-              only: main
+              only: master
       - deploy_railway:
           name: deploy_prod
           railway_environment: production
@@ -158,4 +158,4 @@ workflows:
           requires: [hold_prod]
           filters:
             branches:
-              only: main
+              only: master
