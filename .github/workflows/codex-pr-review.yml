@@ -98,6 +98,7 @@ jobs:
             ${{ github.event.pull_request.body }}
 
       - name: Submit GitHub review
+        id: submit_review
         uses: actions/github-script@v7
         env:
           CODEX_RESULT: ${{ steps.codex.outputs.final-message }}
@@ -160,15 +161,21 @@ jobs:
               body,
             });
 
-            if (event === 'REQUEST_CHANGES') {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                body: [
-                  '@cursor fix the Codex review comments',
-                  '',
-                  'Triggered because Codex requested changes.',
-                ].join('\n'),
-              });
-            }
+            core.setOutput('event', event);
+
+      - name: Notify Cursor from connected GitHub user
+        if: steps.submit_review.outputs.event == 'REQUEST_CHANGES'
+        env:
+          GH_TOKEN: ${{ secrets.CURSOR_TRIGGER_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "CURSOR_TRIGGER_GITHUB_TOKEN is required so Cursor sees the trigger as a real connected user, not github-actions[bot]." >&2
+            exit 1
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "@cursor fix the Codex review comments"

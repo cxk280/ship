@@ -8,6 +8,7 @@ When an AI agent prepares changes:
 - Open a pull request into `master` using the agent's GitHub identity or the available CLI identity.
 - Do not use `github-actions[bot]` as the pull request author. The Codex review workflow submits reviews as `github-actions[bot]`, and GitHub does not allow pull request authors to approve their own pull requests.
 - Keep the human owner's only required manual step as clicking the merge button after checks and Codex approval pass.
+- Cursor ignores `github-actions[bot]` trigger comments. Workflows that ask Cursor to fix review comments must use the `CURSOR_TRIGGER_GITHUB_TOKEN` repository secret, which should belong to the GitHub user connected to Cursor.
 
 ## Pull Request Reviews
 
