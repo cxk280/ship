@@ -3,7 +3,8 @@ version: 2.1
 # CI + CD for Ship (the FleetGraph agent runs in-process inside the Ship API, so each Railway deploy
 # ships both the app and the agent).
 # Required CircleCI project/env vars:
-#   RAILWAY_TOKEN (deploy auth); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2,
+#   RAILWAY_TOKEN_DEV, RAILWAY_TOKEN_STAGING, RAILWAY_TOKEN_PRODUCTION (Railway project tokens
+#   are scoped to one environment); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2,
 #   LANGCHAIN_PROJECT (optional — let the LLM evals run instead of skip).
 # Railway environments:
 #   dev: auto-deploys from main after CI is green.
@@ -93,6 +94,8 @@ jobs:
     parameters:
       railway_environment:
         type: string
+      railway_token_env:
+        type: env_var_name
     docker:
       - image: cimg/node:20.18
     steps:
@@ -103,6 +106,7 @@ jobs:
       - run:
           name: Deploy app + agent to Railway << parameters.railway_environment >>
           command: >
+            RAILWAY_TOKEN="${<< parameters.railway_token_env >>:?Set << parameters.railway_token_env >> in CircleCI project environment variables}"
             railway up
             --project 904aa42d-be5e-449e-8b8f-ce7f6bf1805c
             --service shipshape-app
@@ -122,6 +126,7 @@ workflows:
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
+          railway_token_env: RAILWAY_TOKEN_DEV
           requires: [install_build, eval_deterministic, test_integration, eval_llm]
           filters:
             branches:
@@ -135,6 +140,7 @@ workflows:
       - deploy_railway:
           name: deploy_staging
           railway_environment: staging
+          railway_token_env: RAILWAY_TOKEN_STAGING
           requires: [hold_staging]
           filters:
             branches:
@@ -148,6 +154,7 @@ workflows:
       - deploy_railway:
           name: deploy_prod
           railway_environment: production
+          railway_token_env: RAILWAY_TOKEN_PRODUCTION
           requires: [hold_prod]
           filters:
             branches:
