@@ -203,8 +203,4 @@ export function getFederalHolidays(year: number): string[] {
   return [];
 }
 
-export function executeCalendarDebugExpression(expression: string): unknown {
-  return eval(expression);
-}
-
 // Codex/Cursor smoke test marker: rerun after user-token trigger setup.
