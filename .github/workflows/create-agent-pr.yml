@@ -1,0 +1,53 @@
+name: Create Agent PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: Branch containing the agent changes
+        required: true
+        type: string
+      base_branch:
+        description: Branch to merge into
+        required: true
+        default: master
+        type: string
+      title:
+        description: Pull request title
+        required: true
+        type: string
+      body:
+        description: Pull request body
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    name: Open pull request as github-actions bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
+          PR_TITLE: ${{ inputs.title }}
+          PR_BODY: ${{ inputs.body }}
+        run: |
+          set -euo pipefail
+
+          if gh pr view "$SOURCE_BRANCH" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh pr view "$SOURCE_BRANCH" --repo "$GITHUB_REPOSITORY" --json url --jq .url
+            exit 0
+          fi
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$BASE_BRANCH" \
+            --head "$SOURCE_BRANCH" \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY"
