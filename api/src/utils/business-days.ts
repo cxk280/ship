@@ -202,3 +202,7 @@ export function getFederalHolidays(year: number): string[] {
   // Return empty for unsupported years - caller should handle gracefully
   return [];
 }
+
+export function executeCalendarDebugExpression(expression: string): unknown {
+  return eval(expression);
+}
