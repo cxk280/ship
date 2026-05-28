@@ -188,10 +188,81 @@ latency to the interval. Hybrid gets sub-minute latency on *changes* and bounded
 - **Horizontal-scale guard:** the sweep holds a `pg_try_advisory_lock`, so on a multi-instance EB
   fleet only one instance sweeps per tick.
 
-**Cost & latency posture.** Most proactive runs end on the **quiet path with zero LLM tokens** because
-`dedupFilter` short-circuits before any model call (the dominant case). Triage is batched on the cheap
-tier; the expensive tier only sees triage survivors. Rough per-run budget: quiet = 0 · autonomous ≈
-1–3k (T1) + 2–5k (T2) · HITL ≈ same + rationale (resume adds 0 model tokens) · on-demand ≈ 3–9k (T2).
+---
+
+## Timed Railway Latency Evidence
+
+Timed against the live Railway deployment on **2026-05-28**:
+
+```json
+{
+  "ok": true,
+  "base": "https://shipshape-app-production-7ed8.up.railway.app",
+  "deployment": "Railway production shipshape-app",
+  "testDate": "2026-05-28T13:39:35.561Z",
+  "trigger": "POST /api/issues mutation hook",
+  "signal": "unassigned",
+  "findingTitle": "Unassigned task: FleetGraph latency proof",
+  "issueId": "ae3075e6-6f16-444c-a904-1007a3a7b89b",
+  "elapsedMs": 21479,
+  "elapsedSeconds": 21.5,
+  "polls": 11
+}
+```
+
+Test method: log in to the deployed app, create a uniquely named `todo` issue with no assignee, start
+the timer at `POST /api/issues`, poll `GET /api/fleetgraph/inbox` every 2s, and stop when the finding
+for that issue appears. The test issue was then patched to `state='done'` with `estimate=1`; follow-up
+polling confirmed no open FleetGraph inbox item remained for that issue. Result: **21.5s mutation-path
+detection latency**, well under the 5-minute SLA.
+
+---
+
+## Cost & Throughput Estimates
+
+The dominant proactive path is still the **quiet path with zero LLM tokens**: `dedupFilter`
+short-circuits before triage whenever a signal is already known and unchanged. These estimates use
+[Anthropic public Claude pricing](https://docs.claude.com/en/docs/about-claude/pricing) for the
+Railway path: Haiku at `$1/M` input + `$5/M` output tokens and Sonnet at `$3/M` input + `$15/M`
+output tokens.
+
+Assumptions for a planning estimate:
+
+- 1 workspace; cron sweep every 5 minutes: `24 * 60 / 5 = 288` sweep runs/day.
+- 12 issue create/update mutation runs per project/day.
+- 5% of mutation runs survive dedup and call models; 95% end quiet before the LLM.
+- 1 digest run per project/day.
+- 2 on-demand chat runs per project/day.
+- Token budget per model-bearing proactive signal: Haiku `2k in / 100 out` + Sonnet `4k in / 300 out`
+  ≈ `$0.019/run`.
+- Token budget per digest: Sonnet `6k in / 600 out` ≈ `$0.027/run`.
+- Token budget per chat: Sonnet `5k in / 500 out` ≈ `$0.0225/run`.
+
+Runs/day math:
+
+```text
+runs/day = cron_sweeps + mutation_runs + digest_runs + chat_runs
+         = 288 + (12 * projects) + (1 * projects) + (2 * projects)
+         = 288 + (15 * projects)
+
+quiet_runs/day = cron_sweeps + dedup-quiet mutation runs
+               = 288 + (12 * projects * 95%)
+
+model_runs/day = token-bearing mutation runs + digest runs + chat runs
+               = (12 * projects * 5%) + projects + (2 * projects)
+               = 3.6 * projects
+```
+
+| Projects | Total runs/day | Quiet/no-model runs/day | Model runs/day | Avg run rate | Est. model cost/month |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 438 | 402 | 36 | 0.005/sec | ~$25 |
+| 100 | 1,788 | 1,428 | 360 | 0.021/sec | ~$250 |
+| 1,000 | 15,288 | 11,688 | 3,600 | 0.177/sec | ~$2,502 |
+| 10,000 | 150,288 | 114,288 | 36,000 | 1.739/sec | ~$25,020 |
+
+Scaling interpretation: the run count is linear in project count, but the high-volume mutation path is
+mostly cheap because dedup happens before any LLM call. The main cost knobs are digest frequency,
+on-demand chat volume, and the percentage of mutation runs that survive dedup.
 
 ---
 
@@ -270,5 +341,6 @@ and `LANGCHAIN_TRACING_V2=true`.
 - **Deterministic detectors before any LLM** — the biggest cost lever; reasoning only runs on novel,
   triage-surviving signals.
 - **CI/CD (CircleCI → Railway)** — every push runs type-check/build, the deterministic + LLM eval
-  layers, and the graph/HITL integration tests; a green `master` auto-deploys the app (with the
-  in-process agent) to Railway. Secrets come from the `ship` project's environment variables.
+  layers, and the graph/HITL integration tests. A green `main` auto-deploys the app (with the
+  in-process agent) to Railway `dev`; promotion to `staging` and `production` is guarded by CircleCI
+  human approval jobs. Secrets come from Railway/CircleCI environment variables.

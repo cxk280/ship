@@ -1,11 +1,14 @@
 version: 2.1
 
-# CI + CD for Ship (the FleetGraph agent runs in-process inside the Ship API, so the single
-# Railway deploy ships both the app and the agent).
-# Secrets come from the `ship` project's Environment Variables (Project Settings → Environment
-# Variables), so every job sees them without a context:
-#   RAILWAY_TOKEN (required for deploy); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY,
-#   LANGCHAIN_TRACING_V2, LANGCHAIN_PROJECT (optional — let the LLM evals run instead of skip).
+# CI + CD for Ship (the FleetGraph agent runs in-process inside the Ship API, so each Railway deploy
+# ships both the app and the agent).
+# Required CircleCI project/env vars:
+#   RAILWAY_TOKEN (deploy auth); ANTHROPIC_API_KEY, LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2,
+#   LANGCHAIN_PROJECT (optional — let the LLM evals run instead of skip).
+# Railway environments:
+#   dev: auto-deploys from main after CI is green.
+#   staging: manual approval after dev deploy.
+#   production: manual approval after staging deploy.
 
 commands:
   setup_node:
@@ -86,7 +89,10 @@ jobs:
           name: Layers 3+4 — LLM-graded + adversarial evals (LangSmith)
           command: pnpm --filter @ship/api fleetgraph:eval:llm
 
-  deploy:
+  deploy_railway:
+    parameters:
+      railway_environment:
+        type: string
     docker:
       - image: cimg/node:20.18
     steps:
@@ -95,8 +101,13 @@ jobs:
           name: Install Railway CLI
           command: sudo npm i -g @railway/cli
       - run:
-          name: Deploy app + agent to Railway
-          command: railway up --service shipshape-app --ci
+          name: Deploy app + agent to Railway << parameters.railway_environment >>
+          command: >
+            railway up
+            --project 904aa42d-be5e-449e-8b8f-ce7f6bf1805c
+            --service shipshape-app
+            --environment << parameters.railway_environment >>
+            --ci
 
 workflows:
   build-test-deploy:
@@ -108,8 +119,36 @@ workflows:
           requires: [install_build]
       - eval_llm:
           requires: [install_build]
-      - deploy:
+      - deploy_railway:
+          name: deploy_dev
+          railway_environment: dev
           requires: [install_build, eval_deterministic, test_integration, eval_llm]
           filters:
             branches:
-              only: master
+              only: main
+      - hold_staging:
+          type: approval
+          requires: [deploy_dev]
+          filters:
+            branches:
+              only: main
+      - deploy_railway:
+          name: deploy_staging
+          railway_environment: staging
+          requires: [hold_staging]
+          filters:
+            branches:
+              only: main
+      - hold_prod:
+          type: approval
+          requires: [deploy_staging]
+          filters:
+            branches:
+              only: main
+      - deploy_railway:
+          name: deploy_prod
+          railway_environment: production
+          requires: [hold_prod]
+          filters:
+            branches:
+              only: main
