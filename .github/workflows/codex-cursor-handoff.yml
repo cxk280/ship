@@ -1,0 +1,40 @@
+name: Codex Cursor Handoff
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+jobs:
+  notify-cursor:
+    name: Notify Cursor when Codex requests changes
+    runs-on: ubuntu-latest
+    if: >
+      github.event.review.state == 'changes_requested' &&
+      (
+        contains(github.event.review.user.login, 'codex') ||
+        contains(github.event.review.user.login, 'openai')
+      )
+    steps:
+      - name: Comment with Cursor handoff
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reviewer = context.payload.review.user.login;
+            const reviewUrl = context.payload.review.html_url;
+            const body = [
+              '@cursor fix the Codex review comments',
+              '',
+              `Triggered because ${reviewer} requested changes: ${reviewUrl}`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });
