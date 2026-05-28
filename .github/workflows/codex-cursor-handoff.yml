@@ -20,21 +20,18 @@ jobs:
         contains(github.event.review.user.login, 'openai')
       )
     steps:
-      - name: Comment with Cursor handoff
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const reviewer = context.payload.review.user.login;
-            const reviewUrl = context.payload.review.html_url;
-            const body = [
-              '@cursor fix the Codex review comments',
-              '',
-              `Triggered because ${reviewer} requested changes: ${reviewUrl}`,
-            ].join('\n');
+      - name: Comment with Cursor handoff from connected GitHub user
+        env:
+          GH_TOKEN: ${{ secrets.CURSOR_TRIGGER_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.pull_request.number,
-              body,
-            });
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "CURSOR_TRIGGER_GITHUB_TOKEN is required so Cursor sees the trigger as a real connected user, not github-actions[bot]." >&2
+            exit 1
+          fi
+
+          gh pr comment "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "@cursor fix the Codex review comments"
