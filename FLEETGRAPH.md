@@ -299,30 +299,40 @@ Approve / Snooze / Dismiss); the **chat** button opens context-aware chat scoped
 
 ---
 
-## Test Cases  *(Early Submission — trace links added once `LANGCHAIN_API_KEY` is set)*
+## Test Cases
 
-Verified end-to-end against real seeded Ship data (`api` + Postgres), no mocks:
+Coverage is one-to-one with the 11 Use Cases above. Deterministic detector, dedup, validation, and
+graph integration coverage lives in `api/src/fleetgraph/evals/*` and `api/src/fleetgraph/__tests__/*`.
+Public LangSmith links are attached at the case level instead of being grouped by graph path.
 
-| # | Ship state | Expected output | Status |
-|---|-----------|-----------------|--------|
-| 1 | Open issue with no `assignee_id` | `unassigned` finding (auto), in inbox + notify | ✅ verified |
-| 2 | Open issue with no `estimate` | `unestimated` finding (auto) | ✅ verified |
-| 3 | Issue `due_date` in the past, not done | `overdue` finding + **pending approval** to raise Urgent | ✅ verified |
-| 4 | Approve the overdue action | `priority` PATCHed `→ urgent`, `document_history` row `automated_by='fleetgraph'`, approval resolved | ✅ verified |
-| 5 | Run the sweep again, nothing changed | **0 new findings** (dedup idempotent) | ✅ verified |
-| 6 | On-demand chat with `scope` from current view | grounded answer (Tier-2) returned to the panel | ✅ verified (LLM path; falls back gracefully if Bedrock unavailable) |
+Latest verification on 2026-05-30:
 
-### LangSmith trace links (different execution paths)
+- `pnpm --filter @ship/api fleetgraph:eval` — 17/17 detector cases and 10/10 dedup/suppression cases passed.
+- `DATABASE_URL=postgresql://ship:ship_dev_password@localhost:5433/ship_dev pnpm --filter @ship/api exec vitest run src/fleetgraph/__tests__/graph.integration.test.ts` — 11/11 Postgres-backed graph integration tests passed, including digest and HITL approval/dismiss/snooze paths.
 
-| Path | What it exercises | Trace |
-|------|-------------------|-------|
-| On-demand chat | `router → resolveContext → fetch ×4 → answerNode → respond` | https://smith.langchain.com/public/11e35f97-9a7d-4cf5-a666-813f24a3db8e/r |
-| Proactive HITL | `detect → dedup → triage → reason → classify → surfaceAuto → humanGate (INTERRUPT)` | https://smith.langchain.com/public/7c242ba9-4411-42ce-8f90-398fa9065180/r |
-| Proactive quiet | `detect → dedup → END` (dedup short-circuit, no LLM) | https://smith.langchain.com/public/fa64325b-b50b-4780-b1ac-68854141b832/r |
+| Use case | Ship state for the run | Expected output | Test / evidence | Public LangSmith trace |
+|---:|---|---|---|---|
+| 1 | Issue is `in_progress`, assigned, started 12 days ago, and has had no activity for 10 days. | `stale_in_progress` HITL finding proposing a move back to To Do; no mutation before approval. | `evals/cases.ts` `stale in-progress` and `stale high severity`; `triage-keeps-critical.test.ts` protects high-severity stale work from model pruning. | Trace capture blocked by LangSmith quota (`429 Monthly unique traces usage limit exceeded`); deterministic tests are passing locally. |
+| 2 | Cron sweep over real workspace with open `todo` issues `#1`-`#5` missing `assignee_id`. | `unassigned` signals for each affected issue; autonomous inbox findings/notifications. | `graph.integration.test.ts` autonomous path; `evals/cases.ts` `unassigned + unestimated`. | https://smith.langchain.com/public/067a8b3b-13e7-43f6-8291-b6bf10ede675/r |
+| 3 | Same cron sweep: open `todo` issues `#1`-`#5` missing `estimate`. | `unestimated` signals for each affected issue; autonomous inbox findings/notifications. | `graph.integration.test.ts` autonomous path; `evals/cases.ts` `unassigned + unestimated`. | https://smith.langchain.com/public/067a8b3b-13e7-43f6-8291-b6bf10ede675/r |
+| 4 | Issue `#9101 FGTEST trace overdue` is open and four days overdue. | `overdue` signal survives triage and enters the HITL path with a priority-bump approval card. | `graph.integration.test.ts` asserts approval creates `document_history.automated_by='fleetgraph'`. | https://smith.langchain.com/public/7c242ba9-4411-42ce-8f90-398fa9065180/r |
+| 5 | On-demand chat over workspace scope asks: "Is this workspace on track? Call out anything overdue, unassigned, or stalled and what I should do next." | Grounded answer naming overdue/unassigned/stalled risks and next actions; no write unless user requests one. | `evals/llm/datasets.ts` `CHAT` groundedness cases. | https://smith.langchain.com/public/11e35f97-9a7d-4cf5-a666-813f24a3db8e/r |
+| 6 | Active Week 5, 71% elapsed, 20% done, owner Dana, confidence 80. | `sprint_slip` signal to sprint owner: elapsed fraction is materially ahead of done fraction. | `evals/cases.ts` `sprint slip` and `sprint slip notifies owner`; also quiet case for on-track sprint. | Trace capture blocked by LangSmith quota (`429 Monthly unique traces usage limit exceeded`); deterministic test is passing locally. |
+| 7 | Dana has 12h+ open estimated work against 10h capacity; Sam has slack. | `capacity_overload` high-severity signal, notifying Dana and `reports_to`, with reassignment proposal for lowest-priority work. | `evals/cases.ts` `capacity overload` and `capacity overload is high + notifies person & reports_to`; LLM triage keeps high severity. | Trace capture blocked by LangSmith quota; deterministic test is passing locally. |
+| 8 | On-demand chat over scoped issues asks: "Reassign #101 to Bob". | Validated `reassign` action: entity `i-101`, payload `{"assignee_id":"u-bob"}`, inline Apply/Cancel. | `chat-action-validation.test.ts`; `evals/llm/datasets.ts` `ACTION`. | https://smith.langchain.com/public/9bb8f578-d193-451a-bb74-16547e0f26e8/r |
+| 9 | Daily digest run for a project with open work and no digest yet for today. | One `digest` finding per project/day: moving work, risks, and the single next action; second same-day run dedups. | `graph.integration.test.ts` `digest path: one finding per project, deduped per day`; passed against local Postgres on 2026-05-30. | Trace capture blocked by LangSmith quota; Postgres integration test passed locally. |
+| 10 | Workspace has dismissed `unestimated` findings three times; a new `unestimated` signal arrives. | `filterNovel` suppresses the new signal; below threshold (two dismissals), it still surfaces. | `evals/dedup-cases.ts` adaptive suppression at/below threshold. | Trace capture blocked by LangSmith quota; deterministic test is passing locally. |
+| 11 | Workspace census fixture has 23 documents: 8 issues, 5 wikis, 4 people, 3 sprints, 2 projects, 1 program. | On-demand answers counts and lists from `census` + `docIndex`, e.g. 23 total docs and project names. | `graph.integration.test.ts` document census/index; `evals/llm/datasets.ts` `LANDSCAPE`. | https://smith.langchain.com/public/f4e5d584-2ebe-4578-a7a4-8edc4c5a43e9/r and https://smith.langchain.com/public/cd8deacd-0f7e-4f16-943b-b484f9cae26b/r |
 
-Three visibly different graph shapes from the same graph under different conditions — a graph, not a
-pipeline. Captured with real Claude reasoning (Anthropic API, `claude-sonnet-4-6` / `claude-haiku-4-5`)
-and `LANGCHAIN_TRACING_V2=true`.
+Additional public traces for exact workspace-census subcases: team count
+https://smith.langchain.com/public/18a8f7cf-cd15-4d58-bf34-87920b769710/r, team capacity
+https://smith.langchain.com/public/651e298c-084d-4042-8573-5a1af4e0a8df/r, and unassigned issue list
+https://smith.langchain.com/public/bf95c5e5-d339-480c-ae19-f23cc70739f7/r.
+
+Captured traces use real Claude reasoning (Anthropic API, `claude-sonnet-4-6` / `claude-haiku-4-5`)
+and `LANGCHAIN_TRACING_V2=true`. New trace creation was attempted on 2026-05-30 but LangSmith rejected
+it because the tenant had exceeded the monthly unique-trace quota; existing public traces above were
+shared from already-recorded runs.
 
 ---
 
