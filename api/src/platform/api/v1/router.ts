@@ -13,6 +13,8 @@
  */
 import { Router, type RequestHandler } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
+import type { IdentityPort } from './ports.js';
+import { createMeRouter } from './me.js';
 
 /**
  * Collaborators injected by the composition root. Grows slice by slice
@@ -22,23 +24,24 @@ import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../
 export interface PlatformDeps {
   /**
    * Bearer-token authentication for the public edge. Validates the OAuth access
-   * token and populates req.platformAuth. Injected in Slice 2; when absent (early
-   * foundation), the edge has no authenticated routes mounted yet.
+   * token and populates req.platformAuth.
    */
-  bearerAuth?: RequestHandler;
+  bearerAuth: RequestHandler;
+  /** Identity lookups (e.g. for /me). */
+  identity: IdentityPort;
 }
 
-export function createV1Router(_deps: PlatformDeps = {}): Router {
+export function createV1Router(deps: PlatformDeps): Router {
   const router = Router();
 
   // Every public request gets a request id (echoed as X-Request-Id, used by the
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
 
-  // Resource routers are mounted here in later slices, e.g.:
-  //   router.use('/me', createMeRouter(deps));
-  //   router.use('/documents', createDocumentsRouter(deps));
-  // Each authenticated route runs deps.bearerAuth then requireScope(...).
+  // Resource routers. Each authenticated route runs deps.bearerAuth then
+  // requireScope(...). /me is identity (auth only, no specific scope).
+  router.use('/me', createMeRouter(deps));
+  // Slice 3 adds: router.use('/documents', createDocumentsRouter(deps)); etc.
 
   // Terminal handlers — must come last, in this order.
   router.use(publicNotFoundHandler);

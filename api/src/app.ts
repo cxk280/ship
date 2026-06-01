@@ -40,6 +40,8 @@ import fleetgraphRoutes from './routes/fleetgraph.js';
 import { setupSwagger } from './swagger.js';
 import { initializeCAIA } from './services/caia.js';
 import { buildPlatform } from './platform/composition.js';
+import { createOAuthRouter } from './platform/oauth/routes.js';
+import { createAppsRouter } from './platform/apps/routes.js';
 
 // Validate SESSION_SECRET in production
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -185,12 +187,16 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   setupSwagger(app);
 
   // ----------------------------------------------------------------------------
-  // PUBLIC PLATFORM EDGE — `/api/v1`
-  // A fresh router with its OWN pipeline (request-id → bearer auth → scope →
-  // rate-limit → audit → handler). It shares no request-handling middleware with
-  // the internal `/api/*` routes below. Wired in the composition root.
+  // PUBLIC PLATFORM EDGE — `/api/v1` + OAuth 2.0 server
+  // The v1 router is a fresh pipeline (request-id → bearer auth → scope →
+  // rate-limit → audit → handler) sharing no request-handling middleware with the
+  // internal `/api/*` routes below. The OAuth server (/oauth/*) authenticates
+  // Ship users (consent) or clients (token); it runs its own CSRF, so it is NOT
+  // wrapped in conditionalCsrf. App management (/api/oauth/apps) is session-authed.
   // ----------------------------------------------------------------------------
   app.use('/api/v1', buildPlatform().v1Router);
+  app.use('/oauth', createOAuthRouter());
+  app.use('/api/oauth/apps', conditionalCsrf, createAppsRouter());
 
   // Setup routes (CSRF protected - first-time setup only)
   app.use('/api/setup', conditionalCsrf, setupRoutes);

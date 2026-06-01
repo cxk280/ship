@@ -5,15 +5,22 @@
  * internal middleware — and asserts the foundation behaviors that every later
  * route inherits: request-id echo and the ApiError 404 shape.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { createV1Router } from '../api/v1/router.js';
+import { createV1Router, type PlatformDeps } from '../api/v1/router.js';
+
+const stubDeps: PlatformDeps = {
+  // Edge-contract tests only exercise unmatched routes, so the stub deps are
+  // never actually invoked.
+  bearerAuth: (_req, _res, next) => next(),
+  identity: { getUser: vi.fn() },
+};
 
 function app() {
   const a = express();
   a.use(express.json());
-  a.use('/api/v1', createV1Router());
+  a.use('/api/v1', createV1Router(stubDeps));
   return a;
 }
 
