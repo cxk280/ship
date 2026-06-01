@@ -57,6 +57,11 @@ export const CreateDocumentSchema = z
   })
   .openapi('CreateDocument');
 
+/** Path param for /documents/{id} — same UUID rule the OpenAPI spec declares. */
+export const DocumentIdParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const ListDocumentsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().optional(),

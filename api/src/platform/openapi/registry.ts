@@ -7,7 +7,6 @@
  * test asserts spec↔route parity so the spec cannot drift from the server.
  */
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
-import { z } from 'zod';
 import type { OpenAPIObject } from 'openapi3-ts/oas31';
 import {
   ApiErrorSchema,
@@ -15,6 +14,7 @@ import {
   DocumentPageSchema,
   CreateDocumentSchema,
   ListDocumentsQuerySchema,
+  DocumentIdParamSchema,
   MeResponseSchema,
 } from '../api/v1/schemas.js';
 
@@ -83,7 +83,7 @@ registry.registerPath({
   summary: 'Get a document by id',
   tags: ['documents'],
   security: [{ bearerAuth: [] }],
-  request: { params: z.object({ id: z.string().uuid() }) },
+  request: { params: DocumentIdParamSchema },
   responses: {
     200: { description: 'The document', content: { 'application/json': { schema: PublicDocumentSchema } } },
     ...errorResponses(401, 403, 404),

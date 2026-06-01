@@ -67,6 +67,16 @@ describe('POST + GET /api/v1/documents', () => {
     expect(fetched.body.id).toBe(created.body.id);
   });
 
+  it('400s (validation_failed) for a non-UUID id — not a 500 from Postgres', async () => {
+    const token = await mintToken(['documents:read']);
+    const res = await request(v1App())
+      .get('/api/v1/documents/not-a-uuid')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('validation_failed');
+    expect(res.body.request_id).toBeTruthy();
+  });
+
   it('404s (ApiError) for a missing document', async () => {
     const token = await mintToken(['documents:read']);
     const res = await request(v1App())

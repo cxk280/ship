@@ -10,7 +10,7 @@ import { ApiError } from '../../errors.js';
 import { requireScope } from '../../scopes/require-scope.js';
 import { SCOPES } from '../../scopes/registry.js';
 import { publicRoutes } from './route-meta.js';
-import { ListDocumentsQuerySchema, CreateDocumentSchema } from './schemas.js';
+import { ListDocumentsQuerySchema, CreateDocumentSchema, DocumentIdParamSchema } from './schemas.js';
 import type { PlatformDeps } from './router.js';
 
 /** Resolve the workspace the token operates in, or 403 if it has none. */
@@ -56,9 +56,12 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
     requireScope(SCOPES.DOCUMENTS_READ),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
+        // Validate the path param against the SAME schema the OpenAPI declares
+        // (UUID). A non-UUID id is a client error (400), not a 500 from Postgres.
+        const { id } = DocumentIdParamSchema.parse(req.params);
         const doc = await deps.documents.get({
           workspaceId: requireWorkspace(req),
-          id: String(req.params.id),
+          id,
         });
         if (!doc) throw ApiError.notFound('Document not found');
         res.json(doc);
