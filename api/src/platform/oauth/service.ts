@@ -167,15 +167,38 @@ export async function exchangeAuthorizationCode(input: {
     throw new OAuthError('invalid_grant', 'PKCE verification failed');
   }
 
-  await store.consumeAuthCode(row.id);
-  return mintTokens({
-    app: input.app,
-    userId: row.user_id,
-    workspaceId: row.workspace_id,
-    scopes: row.scopes,
-    grantType: 'authorization_code',
-    withRefresh: true,
+  const accessRaw = generate.accessToken();
+  const refreshRaw = generate.refreshToken();
+  const consumed = await store.consumeAuthCodeAndMintTokens({
+    authCodeId: row.id,
+    accessToken: {
+      tokenHash: sha256(accessRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes: row.scopes,
+      grantType: 'authorization_code',
+      expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+    },
+    refreshToken: {
+      tokenHash: sha256(refreshRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes: row.scopes,
+      familyId: randomUUID(),
+      expiresAt: new Date(Date.now() + TTL.refreshSec * 1000),
+    },
   });
+  if (!consumed) throw new OAuthError('invalid_grant', 'Authorization code already used');
+
+  return {
+    access_token: accessRaw,
+    token_type: 'Bearer',
+    expires_in: TTL.accessSec,
+    refresh_token: refreshRaw,
+    scope: row.scopes.join(' '),
+  };
 }
 
 // ---- refresh token rotation -----------------------------------------------
@@ -317,28 +340,53 @@ export async function pollDeviceToken(input: {
   if (!row || row.app_id !== input.app.id) throw new OAuthError('invalid_grant', 'Unknown device_code');
   if (new Date(row.expires_at).getTime() < Date.now()) throw new OAuthError('expired_token', 'Device code expired');
 
-  // slow_down: reject polls faster than the advertised interval (RFC 8628 §3.5).
-  if (row.last_polled_at) {
-    const since = Date.now() - new Date(row.last_polled_at).getTime();
-    if (since < row.interval_sec * 1000) {
-      await store.touchDevicePoll(row.id);
-      throw new OAuthError('slow_down', `Polling too fast; wait ${row.interval_sec}s`);
-    }
-  }
-  await store.touchDevicePoll(row.id);
-
   if (row.status === 'denied') throw new OAuthError('access_denied', 'User denied the request');
-  if (row.status === 'pending') throw new OAuthError('authorization_pending', 'Waiting for user approval');
+  if (row.status === 'pending') {
+    // slow_down: reject polls faster than the advertised interval (RFC 8628 §3.5).
+    if (row.last_polled_at) {
+      const since = Date.now() - new Date(row.last_polled_at).getTime();
+      if (since < row.interval_sec * 1000) {
+        await store.touchDevicePoll(row.id);
+        throw new OAuthError('slow_down', `Polling too fast; wait ${row.interval_sec}s`);
+      }
+    }
+    await store.touchDevicePoll(row.id);
+    throw new OAuthError('authorization_pending', 'Waiting for user approval');
+  }
 
-  // approved → mint tokens once, then delete the device code (single use).
-  const tokens = await mintTokens({
-    app: input.app,
-    userId: row.user_id,
-    workspaceId: row.workspace_id,
-    scopes: row.scopes,
-    grantType: 'device_code',
-    withRefresh: true,
+  if (!row.user_id) throw new OAuthError('invalid_grant', 'Approved device code is missing a user');
+
+  // approved → atomically claim/delete the device code and mint tokens once.
+  const accessRaw = generate.accessToken();
+  const refreshRaw = generate.refreshToken();
+  const claimed = await store.claimDeviceCodeAndMintTokens({
+    deviceCodeId: row.id,
+    accessToken: {
+      tokenHash: sha256(accessRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes: row.scopes,
+      grantType: 'device_code',
+      expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+    },
+    refreshToken: {
+      tokenHash: sha256(refreshRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes: row.scopes,
+      familyId: randomUUID(),
+      expiresAt: new Date(Date.now() + TTL.refreshSec * 1000),
+    },
   });
-  await store.deleteDeviceCode(row.id);
-  return tokens;
+  if (!claimed) throw new OAuthError('invalid_grant', 'Device code already used');
+
+  return {
+    access_token: accessRaw,
+    token_type: 'Bearer',
+    expires_in: TTL.accessSec,
+    refresh_token: refreshRaw,
+    scope: row.scopes.join(' '),
+  };
 }
