@@ -17,6 +17,7 @@ import { createV1Router } from '../router.js';
 
 let workspaceId: string;
 let userId: string;
+let otherUserId: string;
 let appId: string;
 
 function v1App() {
@@ -27,11 +28,15 @@ function v1App() {
 }
 
 /** Mint an access token directly with the given scopes. */
-async function mintToken(scopes: string[]): Promise<string> {
+async function mintToken(
+  scopes: string[],
+  subjectUserId: string | null = userId,
+  grantType = 'authorization_code',
+): Promise<string> {
   const raw = generate.accessToken();
   await store.insertAccessToken({
-    tokenHash: sha256(raw), appId, userId, workspaceId, scopes,
-    grantType: 'authorization_code', expiresAt: new Date(Date.now() + 3600_000),
+    tokenHash: sha256(raw), appId, userId: subjectUserId, workspaceId, scopes,
+    grantType, expiresAt: new Date(Date.now() + 3600_000),
   });
   return raw;
 }
@@ -41,12 +46,52 @@ beforeAll(async () => {
   workspaceId = ws.rows[0].id;
   const u = await pool.query(`INSERT INTO users (email, name) VALUES ('docs-v1@example.com','Docs Tester') RETURNING id`);
   userId = u.rows[0].id;
+  const otherUser = await pool.query(
+    `INSERT INTO users (email, name) VALUES ('docs-v1-other@example.com','Docs Other User') RETURNING id`,
+  );
+  otherUserId = otherUser.rows[0].id;
+  await pool.query(
+    `INSERT INTO workspace_memberships (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member')`,
+    [workspaceId, userId, otherUserId],
+  );
   const app = await store.createApp({
     clientId: 'ship_app_docs', clientSecretHash: await hashClientSecret('x'), name: 'Docs App',
     redirectUris: [], requestedScopes: ['documents:read', 'documents:write'], appType: 'confidential',
     ownerUserId: userId, workspaceId,
   });
   appId = app.id;
+});
+
+describe('document visibility', () => {
+  it('omits and 404s another user private document', async () => {
+    const privateDoc = await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+       VALUES ($1, 'program', 'Owner Private Program', 'private', $2)
+       RETURNING id`,
+      [workspaceId, userId],
+    );
+    const workspaceDoc = await pool.query(
+      `INSERT INTO documents (workspace_id, document_type, title, visibility, created_by)
+       VALUES ($1, 'program', 'Workspace Program', 'workspace', $2)
+       RETURNING id`,
+      [workspaceId, userId],
+    );
+    const token = await mintToken(['documents:read'], otherUserId);
+
+    const list = await request(v1App())
+      .get('/api/v1/documents?document_type=program&limit=100')
+      .set('Authorization', `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const ids = list.body.data.map((d: { id: string }) => d.id);
+    expect(ids).toContain(workspaceDoc.rows[0].id);
+    expect(ids).not.toContain(privateDoc.rows[0].id);
+
+    const fetched = await request(v1App())
+      .get(`/api/v1/documents/${privateDoc.rows[0].id}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(fetched.status).toBe(404);
+    expect(fetched.body).toMatchObject({ code: 'not_found' });
+  });
 });
 
 describe('POST + GET /api/v1/documents', () => {

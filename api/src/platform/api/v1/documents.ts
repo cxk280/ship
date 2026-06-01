@@ -53,6 +53,7 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
         const q = listQuerySchema.parse(req.query);
         const page = await deps.documents.list({
           workspaceId: requireWorkspace(req),
+          viewerUserId: req.platformAuth?.userId ?? null,
           limit: q.limit,
           cursor: q.cursor,
           documentType: q.document_type,
@@ -73,6 +74,7 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
       try {
         const doc = await deps.documents.get({
           workspaceId: requireWorkspace(req),
+          viewerUserId: req.platformAuth?.userId ?? null,
           id: String(req.params.id),
         });
         if (!doc) throw ApiError.notFound('Document not found');

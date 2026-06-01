@@ -42,12 +42,19 @@ export interface Page<T> {
 export interface DocumentsPort {
   list(input: {
     workspaceId: string;
+    /** Delegating user, or null for client-credentials tokens. */
+    viewerUserId: string | null;
     limit: number;
     cursor?: string;
     documentType?: string;
   }): Promise<Page<PublicDocument>>;
 
-  get(input: { workspaceId: string; id: string }): Promise<PublicDocument | null>;
+  get(input: {
+    workspaceId: string;
+    /** Delegating user, or null for client-credentials tokens. */
+    viewerUserId: string | null;
+    id: string;
+  }): Promise<PublicDocument | null>;
 
   create(input: {
     workspaceId: string;

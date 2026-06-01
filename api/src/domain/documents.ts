@@ -36,6 +36,15 @@ export interface ListResult {
 const COLUMNS =
   'id, workspace_id, document_type::text AS document_type, title, content, properties, parent_id, created_by, created_at, updated_at';
 
+function visibleToViewerSql(workspaceParam: string, viewerParam: string): string {
+  return `(visibility = 'workspace' OR created_by = ${viewerParam} OR EXISTS (
+      SELECT 1 FROM workspace_memberships
+      WHERE workspace_id = ${workspaceParam}
+        AND user_id = ${viewerParam}
+        AND role = 'admin'
+    ))`;
+}
+
 export const documentsDomain = {
   /**
    * Keyset pagination ordered by (created_at DESC, id DESC). Stable across
@@ -44,12 +53,17 @@ export const documentsDomain = {
    */
   async list(input: {
     workspaceId: string;
+    viewerUserId: string | null;
     limit: number;
     after?: Keyset | null;
     documentType?: string;
   }): Promise<ListResult> {
-    const params: unknown[] = [input.workspaceId];
-    const where = ['workspace_id = $1', 'deleted_at IS NULL'];
+    const params: unknown[] = [input.workspaceId, input.viewerUserId];
+    const where = [
+      'workspace_id = $1',
+      'deleted_at IS NULL',
+      visibleToViewerSql('$1', '$2'),
+    ];
     if (input.documentType) {
       params.push(input.documentType);
       where.push(`document_type = $${params.length}::document_type`);
@@ -75,10 +89,18 @@ export const documentsDomain = {
     return { items: rows, nextKeyset };
   },
 
-  async get(input: { workspaceId: string; id: string }): Promise<DomainDocument | null> {
+  async get(input: {
+    workspaceId: string;
+    viewerUserId: string | null;
+    id: string;
+  }): Promise<DomainDocument | null> {
     const r = await pool.query(
-      `SELECT ${COLUMNS} FROM documents WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
-      [input.id, input.workspaceId],
+      `SELECT ${COLUMNS} FROM documents
+       WHERE id = $1
+         AND workspace_id = $2
+         AND deleted_at IS NULL
+         AND ${visibleToViewerSql('$2', '$3')}`,
+      [input.id, input.workspaceId, input.viewerUserId],
     );
     return (r.rows[0] as DomainDocument) ?? null;
   },

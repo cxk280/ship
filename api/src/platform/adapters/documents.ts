@@ -25,6 +25,7 @@ export const documentsAdapter: DocumentsPort = {
     const after = decodeCursor(input.cursor);
     const result = await documentsDomain.list({
       workspaceId: input.workspaceId,
+      viewerUserId: input.viewerUserId,
       limit: input.limit,
       after: after ? { createdAt: after.ts, id: after.id } : null,
       documentType: input.documentType,
@@ -38,7 +39,11 @@ export const documentsAdapter: DocumentsPort = {
   },
 
   async get(input): Promise<PublicDocument | null> {
-    const doc = await documentsDomain.get(input);
+    const doc = await documentsDomain.get({
+      workspaceId: input.workspaceId,
+      viewerUserId: input.viewerUserId,
+      id: input.id,
+    });
     return doc ? toPublic(doc) : null;
   },
 
