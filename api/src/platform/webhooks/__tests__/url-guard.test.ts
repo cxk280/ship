@@ -7,8 +7,13 @@ describe('isPrivateIp', () => {
       expect(isPrivateIp(ip), ip).toBe(true);
     }
   });
-  it('allows public addresses', () => {
-    for (const ip of ['93.184.216.34', '8.8.8.8', '2606:2800:220:1::1']) {
+  it('flags IPv4-mapped IPv6 private addresses in dotted AND hex forms', () => {
+    for (const ip of ['::ffff:127.0.0.1', '::ffff:7f00:1', '::ffff:7f000001', '[::ffff:a9fe:a9fe]', '::ffff:10.0.0.1']) {
+      expect(isPrivateIp(ip), ip).toBe(true);
+    }
+  });
+  it('allows public addresses (incl. mapped public)', () => {
+    for (const ip of ['93.184.216.34', '8.8.8.8', '2606:2800:220:1::1', '::ffff:8.8.8.8', '::ffff:0808:0808']) {
       expect(isPrivateIp(ip), ip).toBe(false);
     }
   });

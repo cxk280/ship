@@ -9,8 +9,37 @@
  */
 import dns from 'dns';
 
+/**
+ * Extract the embedded IPv4 (dotted) from an IPv4-mapped IPv6 address, handling
+ * the dotted (`::ffff:127.0.0.1`), 2-group hex (`::ffff:7f00:1`), and single hex
+ * (`::ffff:7f000001`) forms Node may normalize to. Returns null if not mapped.
+ */
+function mappedV4(ipLower: string): string | null {
+  const m = ipLower.match(/^::ffff:(.+)$/);
+  if (!m) return null;
+  const tail = m[1]!;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(tail)) return tail; // dotted
+  const groups = tail.split(':');
+  if (groups.length === 2 && groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) {
+    const hi = parseInt(groups[0]!, 16);
+    const lo = parseInt(groups[1]!, 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  if (groups.length === 1 && /^[0-9a-f]{1,8}$/.test(groups[0]!)) {
+    const n = parseInt(groups[0]!, 16);
+    return `${(n >>> 24) & 0xff}.${(n >>> 16) & 0xff}.${(n >>> 8) & 0xff}.${n & 0xff}`;
+  }
+  return null;
+}
+
 export function isPrivateIp(ip: string): boolean {
-  const v4 = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+
+  // IPv4-mapped IPv6 (any form) → classify the embedded IPv4 first.
+  const mapped = mappedV4(lower);
+  if (mapped) return isPrivateIp(mapped);
+
+  const v4 = lower.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (v4) {
     const a = Number(v4[1]);
     const b = Number(v4[2]);
@@ -21,11 +50,10 @@ export function isPrivateIp(ip: string): boolean {
     if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
     return false;
   }
-  const lower = ip.toLowerCase().replace(/^\[|\]$/g, '');
+
   if (lower === '::1' || lower === '::') return true; // loopback / unspecified
   if (lower.startsWith('fe80')) return true; // link-local
   if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
-  if (lower.startsWith('::ffff:')) return isPrivateIp(lower.slice(7)); // v4-mapped
   return false;
 }
 
