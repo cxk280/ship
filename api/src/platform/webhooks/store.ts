@@ -57,10 +57,11 @@ export async function createSubscription(input: {
   return r.rows[0] as SubscriptionRow;
 }
 
-export async function listSubscriptions(appId: string): Promise<SubscriptionRow[]> {
+export async function listSubscriptions(appId: string, workspaceId: string | null): Promise<SubscriptionRow[]> {
   const r = await pool.query(
-    'SELECT * FROM webhook_subscriptions WHERE app_id = $1 ORDER BY created_at DESC',
-    [appId],
+    `SELECT * FROM webhook_subscriptions
+     WHERE app_id = $1 AND workspace_id IS NOT DISTINCT FROM $2 ORDER BY created_at DESC`,
+    [appId, workspaceId],
   );
   return r.rows as SubscriptionRow[];
 }
@@ -152,12 +153,12 @@ export async function updateDeliveryAttempt(
   );
 }
 
-export async function listDeliveries(appId: string, limit = 50): Promise<DeliveryRow[]> {
+export async function listDeliveries(appId: string, workspaceId: string | null, limit = 50): Promise<DeliveryRow[]> {
   const r = await pool.query(
     `SELECT d.* FROM webhook_deliveries d
      JOIN webhook_subscriptions s ON d.subscription_id = s.id
-     WHERE s.app_id = $1 ORDER BY d.created_at DESC LIMIT $2`,
-    [appId, limit],
+     WHERE s.app_id = $1 AND s.workspace_id IS NOT DISTINCT FROM $2 ORDER BY d.created_at DESC LIMIT $3`,
+    [appId, workspaceId, limit],
   );
   return r.rows as DeliveryRow[];
 }

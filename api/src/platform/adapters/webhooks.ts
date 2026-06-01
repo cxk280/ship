@@ -12,6 +12,11 @@ import type { WebhooksPort, PublicSubscription, PublicDelivery } from '../api/v1
 function toPublicSub(r: store.SubscriptionRow): PublicSubscription {
   return { id: r.id, event_type: r.event_type, target_url: r.target_url, active: r.active, created_at: r.created_at };
 }
+/** NULL-safe workspace equality (mirrors SQL IS NOT DISTINCT FROM). */
+function sameWorkspace(a: string | null, b: string | null): boolean {
+  return a === b;
+}
+
 function toPublicDelivery(r: store.DeliveryRow): PublicDelivery {
   return {
     id: r.id, event_type: r.event_type, attempt_number: r.attempt_number, status: r.status,
@@ -36,28 +41,30 @@ export function createWebhooksAdapter(bus: InMemoryEventBus): WebhooksPort {
       return { subscription: toPublicSub(row), signing_secret };
     },
 
-    async listSubscriptions(appId) {
-      return (await store.listSubscriptions(appId)).map(toPublicSub);
+    async listSubscriptions({ appId, workspaceId }) {
+      return (await store.listSubscriptions(appId, workspaceId)).map(toPublicSub);
     },
 
-    async deactivateSubscription({ appId, id }) {
+    async deactivateSubscription({ appId, workspaceId, id }) {
       const sub = await store.getSubscription(id);
-      if (!sub || sub.app_id !== appId) return false;
+      // Owned by the app AND the token's workspace (the shared CLI app spans
+      // workspaces, so app_id alone is not sufficient isolation).
+      if (!sub || sub.app_id !== appId || !sameWorkspace(sub.workspace_id, workspaceId)) return false;
       await store.deactivateSubscription(id);
       return true;
     },
 
-    async listDeliveries(appId) {
-      return (await store.listDeliveries(appId)).map(toPublicDelivery);
+    async listDeliveries({ appId, workspaceId }) {
+      return (await store.listDeliveries(appId, workspaceId)).map(toPublicDelivery);
     },
 
-    async replay({ appId, deliveryId }) {
+    async replay({ appId, workspaceId, deliveryId }) {
       const delivery = await store.getDelivery(deliveryId);
       if (!delivery) return false;
       const sub = await store.getSubscription(delivery.subscription_id);
-      // Must be owned by the app AND still active — a deleted (deactivated)
+      // Owned by app+workspace AND still active — a deleted (deactivated)
       // subscription must not be re-used to send to its old target.
-      if (!sub || sub.app_id !== appId || !sub.active) return false;
+      if (!sub || sub.app_id !== appId || !sameWorkspace(sub.workspace_id, workspaceId) || !sub.active) return false;
       const fresh = await bus.replay(deliveryId);
       return fresh !== null;
     },
