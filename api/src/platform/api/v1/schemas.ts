@@ -68,6 +68,45 @@ export const ListDocumentsQuerySchema = z.object({
   document_type: z.enum(DOC_TYPES).optional(),
 });
 
+export const WEBHOOK_EVENT_TYPES = [
+  'document.created', 'document.updated', 'document.deleted',
+  'issue.created', 'issue.assigned', 'issue.status_changed',
+  'sprint.started', 'sprint.completed',
+] as const;
+
+export const CreateSubscriptionSchema = z
+  .object({
+    event_type: z.enum(WEBHOOK_EVENT_TYPES),
+    target_url: z.string().url(),
+  })
+  .openapi('CreateSubscription');
+
+export const SubscriptionSchema = z
+  .object({
+    id: z.string().uuid(),
+    event_type: z.string(),
+    target_url: z.string(),
+    active: z.boolean(),
+    created_at: z.string(),
+  })
+  .openapi('WebhookSubscription');
+
+export const DeliverySchema = z
+  .object({
+    id: z.string().uuid(),
+    event_type: z.string(),
+    attempt_number: z.number().int(),
+    status: z.string(),
+    response_status: z.number().int().nullable(),
+    latency_ms: z.number().int().nullable(),
+    idempotency_key: z.string(),
+    created_at: z.string(),
+  })
+  .openapi('WebhookDelivery');
+
+export const SubscriptionIdParamSchema = z.object({ id: z.string().uuid() });
+export const DeliveryIdParamSchema = z.object({ id: z.string().uuid() });
+
 export const MeResponseSchema = z
   .object({
     user: z

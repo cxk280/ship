@@ -24,6 +24,7 @@ const identity: IdentityPort = {
 };
 
 const noRateLimit: RequestHandler = (_req, _res, next) => next();
+import { stubWebhooks } from '../../../webhooks/__tests__/test-doubles.js';
 
 function publicDoc(content: unknown): PublicDocument {
   return {
@@ -40,7 +41,7 @@ function publicDoc(content: unknown): PublicDocument {
 
 function v1App(documents: DocumentsPort) {
   const app = express();
-  app.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity, documents }));
+  app.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity, documents, webhooks: stubWebhooks }));
   return app;
 }
 

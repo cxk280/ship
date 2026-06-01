@@ -13,9 +13,10 @@
  */
 import { Router, json, type RequestHandler } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
-import type { IdentityPort, DocumentsPort } from './ports.js';
+import type { IdentityPort, DocumentsPort, WebhooksPort } from './ports.js';
 import { createMeRouter } from './me.js';
 import { createDocumentsRouter } from './documents.js';
+import { createWebhooksRouter } from './webhooks.js';
 import { publicRoutes } from './route-meta.js';
 import { getV1OpenApiDocument } from '../../openapi/registry.js';
 
@@ -40,6 +41,8 @@ export interface PlatformDeps {
   identity: IdentityPort;
   /** Documents domain operations. */
   documents: DocumentsPort;
+  /** Webhook subscription management + delivery log + replay. */
+  webhooks: WebhooksPort;
 }
 
 export function createV1Router(deps: PlatformDeps): Router {
@@ -73,6 +76,7 @@ export function createV1Router(deps: PlatformDeps): Router {
   // identity (auth only, no specific scope).
   router.use('/me', createMeRouter(deps));
   router.use('/documents', createDocumentsRouter(deps));
+  router.use('/webhooks', createWebhooksRouter(deps));
 
   // Terminal handlers — must come last, in this order.
   router.use(publicNotFoundHandler);

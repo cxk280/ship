@@ -5,6 +5,7 @@
  */
 import { documentsDomain, type DomainDocument } from '../../domain/documents.js';
 import { encodeCursor, decodeCursor } from '../cursor.js';
+import type { IEventBus } from '../webhooks/event-bus.js';
 import type { DocumentsPort, PublicDocument, Page } from '../api/v1/ports.js';
 
 function toPublic(d: DomainDocument): PublicDocument {
@@ -20,7 +21,13 @@ function toPublic(d: DomainDocument): PublicDocument {
   };
 }
 
-export const documentsAdapter: DocumentsPort = {
+/**
+ * The documents adapter is built with the event bus so a create PUBLISHES
+ * document.created — the domain write is where events originate (never the route
+ * layer). A publish failure is logged, never failing the write itself.
+ */
+export function createDocumentsAdapter(eventBus: IEventBus): DocumentsPort {
+  return {
   async list(input): Promise<Page<PublicDocument>> {
     const after = decodeCursor(input.cursor);
     const result = await documentsDomain.list({
@@ -51,6 +58,23 @@ export const documentsAdapter: DocumentsPort = {
       content: input.content,
       properties: input.properties,
     });
+    // Publish document.created on the write. Never fail the write if delivery
+    // bookkeeping hiccups — the document was created either way.
+    try {
+      await eventBus.publish({
+        type: 'document.created',
+        workspaceId: doc.workspace_id,
+        data: {
+          id: doc.id,
+          document_type: doc.document_type,
+          title: doc.title,
+          workspace_id: doc.workspace_id,
+        },
+      });
+    } catch (err) {
+      console.error('[webhooks] failed to publish document.created:', err);
+    }
     return toPublic(doc);
   },
-};
+  };
+}

@@ -8,6 +8,7 @@
  */
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
 import type { OpenAPIObject } from 'openapi3-ts/oas31';
+import { z } from 'zod';
 import {
   ApiErrorSchema,
   PublicDocumentSchema,
@@ -16,6 +17,11 @@ import {
   ListDocumentsQuerySchema,
   DocumentIdParamSchema,
   MeResponseSchema,
+  CreateSubscriptionSchema,
+  SubscriptionSchema,
+  DeliverySchema,
+  SubscriptionIdParamSchema,
+  DeliveryIdParamSchema,
 } from '../api/v1/schemas.js';
 
 const registry = new OpenAPIRegistry();
@@ -32,6 +38,9 @@ registry.register('Document', PublicDocumentSchema);
 registry.register('DocumentPage', DocumentPageSchema);
 registry.register('CreateDocument', CreateDocumentSchema);
 registry.register('MeResponse', MeResponseSchema);
+registry.register('CreateSubscription', CreateSubscriptionSchema);
+registry.register('WebhookSubscription', SubscriptionSchema);
+registry.register('WebhookDelivery', DeliverySchema);
 
 /** Shared error responses, each shaped as ApiError. */
 function errorResponses(...codes: Array<401 | 403 | 404 | 400 | 429 | 500>) {
@@ -100,6 +109,49 @@ registry.registerPath({
   responses: {
     201: { description: 'The created document', content: { 'application/json': { schema: PublicDocumentSchema } } },
     ...errorResponses(400, 401, 403),
+  },
+});
+
+// ---- webhooks -------------------------------------------------------------
+
+const bearer = [{ bearerAuth: [] }];
+
+registry.registerPath({
+  method: 'post', path: '/webhooks', summary: 'Create a webhook subscription', tags: ['webhooks'], security: bearer,
+  request: { body: { content: { 'application/json': { schema: CreateSubscriptionSchema } } } },
+  responses: {
+    201: { description: 'Subscription created; signing_secret shown once', content: { 'application/json': { schema: SubscriptionSchema } } },
+    ...errorResponses(400, 401, 403),
+  },
+});
+registry.registerPath({
+  method: 'get', path: '/webhooks', summary: 'List webhook subscriptions', tags: ['webhooks'], security: bearer,
+  responses: {
+    200: { description: 'Subscriptions', content: { 'application/json': { schema: z.object({ data: z.array(SubscriptionSchema) }) } } },
+    ...errorResponses(401, 403),
+  },
+});
+registry.registerPath({
+  method: 'delete', path: '/webhooks/{id}', summary: 'Delete a webhook subscription', tags: ['webhooks'], security: bearer,
+  request: { params: SubscriptionIdParamSchema },
+  responses: {
+    200: { description: 'Deleted', content: { 'application/json': { schema: z.object({ status: z.string() }) } } },
+    ...errorResponses(401, 403, 404),
+  },
+});
+registry.registerPath({
+  method: 'get', path: '/webhooks/deliveries', summary: 'List webhook deliveries', tags: ['webhooks'], security: bearer,
+  responses: {
+    200: { description: 'Delivery log', content: { 'application/json': { schema: z.object({ data: z.array(DeliverySchema) }) } } },
+    ...errorResponses(401, 403),
+  },
+});
+registry.registerPath({
+  method: 'post', path: '/webhooks/deliveries/{id}/replay', summary: 'Replay a webhook delivery', tags: ['webhooks'], security: bearer,
+  request: { params: DeliveryIdParamSchema },
+  responses: {
+    202: { description: 'Replay accepted', content: { 'application/json': { schema: z.object({ status: z.string(), delivery_id: z.string() }) } } },
+    ...errorResponses(401, 403, 404),
   },
 });
 

@@ -14,9 +14,13 @@ import type { Router } from 'express';
 import { createV1Router, type PlatformDeps } from './api/v1/router.js';
 import { bearerAuth } from './oauth/bearer.js';
 import { identityAdapter } from './adapters/identity.js';
-import { documentsAdapter } from './adapters/documents.js';
+import { createDocumentsAdapter } from './adapters/documents.js';
+import { createWebhooksAdapter } from './adapters/webhooks.js';
 import { InMemoryTokenBucketLimiter } from './ratelimit/limiter.js';
 import { createRateLimitMiddleware } from './ratelimit/middleware.js';
+import { systemClock } from './webhooks/clock.js';
+import { QueueWebhookDeliverer, fetchTransport } from './webhooks/deliverer.js';
+import { InMemoryEventBus } from './webhooks/event-bus.js';
 
 // Import './types.js' for its side-effecting Express.Request augmentation
 // (requestId, platformAuth) so every consumer sees the public-edge fields.
@@ -46,11 +50,21 @@ export function buildPlatform(): Platform {
     ? new InMemoryTokenBucketLimiter(100_000, 100_000)
     : new InMemoryTokenBucketLimiter(600, 10); // 600 burst, ~600/min sustained
 
+  // Webhook pipeline: domain writes → event bus → deliverer (retry/DLQ). Jitter is
+  // applied in production only (kept at 0 under test for determinism).
+  const deliverer = new QueueWebhookDeliverer({
+    clock: systemClock,
+    transport: fetchTransport(),
+    jitter: relaxed ? () => 0 : () => Math.floor(Math.random() * 1000),
+  });
+  const eventBus = new InMemoryEventBus({ deliverer, clock: systemClock });
+
   const deps: PlatformDeps = {
     bearerAuth,
     rateLimit: createRateLimitMiddleware({ perToken, perApp }),
     identity: identityAdapter,
-    documents: documentsAdapter,
+    documents: createDocumentsAdapter(eventBus),
+    webhooks: createWebhooksAdapter(eventBus),
   };
   const v1Router = createV1Router(deps);
   return { v1Router };
