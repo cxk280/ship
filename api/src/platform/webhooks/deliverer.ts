@@ -13,7 +13,6 @@
 import http from 'node:http';
 import https from 'node:https';
 import dns from 'node:dns';
-import type { LookupFunction } from 'node:net';
 import { signPayload } from './signer.js';
 import type { Clock } from './clock.js';
 import type { WebhookEnvelope } from './events.js';
@@ -89,21 +88,26 @@ export function fetchTransport(timeoutMs = 5000): Transport {
     }
 
     const lib = url.protocol === 'https:' ? https : http;
-    const pinnedLookup: LookupFunction | undefined = pinnedIp
-      ? (((_host: string, _options: unknown, cb: (err: Error | null, addr: string, fam: number) => void) =>
-          cb(null, pinnedIp as string, pinnedFamily)) as unknown as LookupFunction)
+    // Inline lookup (avoid importing a named type that differs across @types/node).
+    const pinnedLookup = pinnedIp
+      ? (_host: string, _options: unknown, cb: (err: Error | null, addr: string, fam: number) => void) =>
+          cb(null, pinnedIp as string, pinnedFamily)
       : undefined;
+
+    // Build options loosely so `lookup` (a net.connect option forwarded by
+    // http.request) doesn't depend on a specific @types/node export.
+    const reqOptions: http.RequestOptions = {
+      method: 'POST',
+      headers: { ...opts.headers, Host: url.host },
+      timeout: timeoutMs,
+      ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
+    };
+    if (pinnedLookup) (reqOptions as Record<string, unknown>).lookup = pinnedLookup;
 
     return await new Promise<TransportResult>((resolve) => {
       const req = lib.request(
         url,
-        {
-          method: 'POST',
-          headers: { ...opts.headers, Host: url.host },
-          timeout: timeoutMs,
-          ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
-          ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
-        },
+        reqOptions,
         (res) => {
           let body = '';
           res.on('data', (c: Buffer) => {
