@@ -19,6 +19,33 @@
 
 ---
 
+## Plugforge — the Ship public API platform
+
+Ship exposes a versioned, OAuth-2.0-secured public API (`/api/v1`) with signed webhooks and a typed SDK (`@ship/sdk`). The live spec is at `/api/v1/openapi.json` (static copy: [`docs/openapi.json`](./docs/openapi.json)).
+
+**Pre-registered read-only app for graders** (read-only sandbox; seeded in every environment via migration `041`):
+
+| Field | Value |
+|-------|-------|
+| `client_id` | `ship_app_grader` |
+| `client_secret` | `ship_secret_grader_readonly_demo` |
+| scopes | `documents:read`, `issues:read`, `sprints:read` |
+
+Get a token and read documents in two calls (replace `$BASE` with the deployed URL):
+
+```bash
+TOKEN=$(curl -s -X POST "$BASE/oauth/token" \
+  -d grant_type=client_credentials \
+  -d client_id=ship_app_grader \
+  -d client_secret=ship_secret_grader_readonly_demo | jq -r .access_token)
+
+curl -s "$BASE/api/v1/documents?limit=5" -H "Authorization: Bearer $TOKEN"   # 200, lists docs
+curl -s -X POST "$BASE/api/v1/documents" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"title":"nope"}'                  # 403 (read-only)
+```
+
+---
+
 ## What is Ship?
 
 Ship is a project management tool that combines documentation, issue tracking, and plan-driven weekly workflows in one place. Instead of switching between a wiki, a task tracker, and a spreadsheet, everything lives together.

@@ -39,6 +39,9 @@ import { documentCommentsRouter, commentsRouter } from './routes/comments.js';
 import fleetgraphRoutes from './routes/fleetgraph.js';
 import { setupSwagger } from './swagger.js';
 import { initializeCAIA } from './services/caia.js';
+import { buildPlatform } from './platform/composition.js';
+import { createOAuthRouter } from './platform/oauth/routes.js';
+import { createAppsRouter } from './platform/apps/routes.js';
 
 // Validate SESSION_SECRET in production
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -82,12 +85,16 @@ const loginLimiter = rateLimit({
 });
 
 // General API rate limit (100 req/min in prod, 1000 in dev)
+// NOTE: This is the INTERNAL API's IP-based limiter. The public `/api/v1` edge
+// shares NO middleware with the internal API (the one-way-door boundary), so it
+// is skipped here and gets its own token-bucket limiter inside the platform.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: isTestEnv ? 10000 : isDevEnv ? 1000 : 100, // High limit for tests/dev
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  skip: (req) => req.path.startsWith('/v1'), // mounted under '/api/', so v1 path is '/v1/...'
 });
 
 
@@ -149,8 +156,13 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     origin: corsOrigin,
     credentials: true,
   }));
-  app.use(express.json({ limit: '10mb' }));  // Large wiki documents can be several MB
-  app.use(express.urlencoded({ extended: true, limit: '10mb' })); // For HTML form submissions
+  // Internal API body parsing. The public `/api/v1` edge parses its OWN body
+  // inside its router (so parse errors ship the ApiError shape with a request id),
+  // so these global parsers skip it — the one-way-door boundary again.
+  const skipV1 = (parser: express.RequestHandler): express.RequestHandler => (req, res, next) =>
+    req.path.startsWith('/api/v1') ? next() : parser(req, res, next);
+  app.use(skipV1(express.json({ limit: '10mb' })));  // Large wiki documents can be several MB
+  app.use(skipV1(express.urlencoded({ extended: true, limit: '10mb' }))); // For HTML form submissions
   app.use(cookieParser(sessionSecret));
 
   // Session middleware for CSRF token storage
@@ -178,6 +190,18 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // API documentation (no auth needed)
   setupSwagger(app);
+
+  // ----------------------------------------------------------------------------
+  // PUBLIC PLATFORM EDGE — `/api/v1` + OAuth 2.0 server
+  // The v1 router is a fresh pipeline (request-id → bearer auth → scope →
+  // rate-limit → audit → handler) sharing no request-handling middleware with the
+  // internal `/api/*` routes below. The OAuth server (/oauth/*) authenticates
+  // Ship users (consent) or clients (token); it runs its own CSRF, so it is NOT
+  // wrapped in conditionalCsrf. App management (/api/oauth/apps) is session-authed.
+  // ----------------------------------------------------------------------------
+  app.use('/api/v1', buildPlatform().v1Router);
+  app.use('/oauth', createOAuthRouter());
+  app.use('/api/oauth/apps', conditionalCsrf, createAppsRouter());
 
   // Setup routes (CSRF protected - first-time setup only)
   app.use('/api/setup', conditionalCsrf, setupRoutes);
