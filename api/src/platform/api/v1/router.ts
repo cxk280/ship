@@ -50,8 +50,9 @@ export function createV1Router(deps: PlatformDeps): Router {
   // The public edge owns its OWN body parsing — so a malformed body throws
   // INSIDE this router (after the request id is set) and is caught by the v1
   // apiErrorHandler below, guaranteeing the ApiError shape even on parse errors.
-  // (The internal /api parser skips /api/v1; see app.ts.)
-  router.use(json({ limit: '1mb' }));
+  // (The internal /api parser skips /api/v1; see app.ts.) Limit matches the
+  // internal 10mb so large document `content` (multi-MB wikis) is still accepted.
+  router.use(json({ limit: '10mb' }));
 
   // Public, unauthenticated: the generated OpenAPI 3.1 spec.
   router.get('/openapi.json', (_req, res) => {
