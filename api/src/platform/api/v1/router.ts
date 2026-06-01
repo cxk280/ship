@@ -16,6 +16,12 @@ import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../
 import type { IdentityPort, DocumentsPort } from './ports.js';
 import { createMeRouter } from './me.js';
 import { createDocumentsRouter } from './documents.js';
+import { publicRoutes } from './route-meta.js';
+import { getV1OpenApiDocument } from '../../openapi/registry.js';
+
+// The spec endpoint is intentionally PUBLIC (graders fetch it without a token)
+// and meta — it opts out of a scope explicitly.
+publicRoutes.register({ method: 'get', path: '/openapi.json', scope: null, paginated: false, summary: 'OpenAPI 3.1 spec for this API' });
 
 /**
  * Collaborators injected by the composition root. Grows slice by slice
@@ -40,6 +46,11 @@ export function createV1Router(deps: PlatformDeps): Router {
   // Every public request gets a request id (echoed as X-Request-Id, used by the
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
+
+  // Public, unauthenticated: the generated OpenAPI 3.1 spec.
+  router.get('/openapi.json', (_req, res) => {
+    res.json(getV1OpenApiDocument());
+  });
 
   // Resource routers. Each authenticated route runs deps.bearerAuth then
   // requireScope(...). /me is identity (auth only, no specific scope).
