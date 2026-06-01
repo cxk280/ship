@@ -430,6 +430,16 @@
               }
             }
           },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Missing or invalid bearer token",
             "content": {

@@ -86,7 +86,7 @@ registry.registerPath({
   request: { params: DocumentIdParamSchema },
   responses: {
     200: { description: 'The document', content: { 'application/json': { schema: PublicDocumentSchema } } },
-    ...errorResponses(401, 403, 404),
+    ...errorResponses(400, 401, 403, 404),
   },
 });
 
