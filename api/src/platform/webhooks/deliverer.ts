@@ -14,6 +14,7 @@ import { signPayload } from './signer.js';
 import type { Clock } from './clock.js';
 import type { WebhookEnvelope } from './events.js';
 import { updateDeliveryAttempt } from './store.js';
+import { assertPublicHttpUrl, allowPrivateTargets } from './url-guard.js';
 
 export const RETRY_DELAYS_MS = [1000, 4000, 16000, 60_000, 300_000, 1_800_000];
 export const MAX_ATTEMPTS = 6;
@@ -47,6 +48,13 @@ function isTransient(status: number): boolean {
 /** Real HTTP transport: POST with a hard timeout; non-2xx surfaces its status. */
 export function fetchTransport(timeoutMs = 5000): Transport {
   return async (url, opts) => {
+    // Defense-in-depth against DNS rebinding: re-validate the target at send time.
+    // A blocked target is a permanent 4xx (→ DLQ), not an endless retry.
+    try {
+      await assertPublicHttpUrl(url, { allowPrivate: allowPrivateTargets() });
+    } catch (e) {
+      return { status: 403, bodyExcerpt: e instanceof Error ? e.message : 'target blocked' };
+    }
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), timeoutMs);
     try {

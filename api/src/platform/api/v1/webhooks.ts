@@ -8,6 +8,7 @@ import { requireScope } from '../../scopes/require-scope.js';
 import { SCOPES } from '../../scopes/registry.js';
 import { publicRoutes } from './route-meta.js';
 import { CreateSubscriptionSchema, SubscriptionIdParamSchema, DeliveryIdParamSchema } from './schemas.js';
+import { assertPublicHttpUrl, allowPrivateTargets } from '../../webhooks/url-guard.js';
 import type { PlatformDeps } from './router.js';
 
 function requireApp(req: Request): string {
@@ -34,6 +35,13 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
         throw ApiError.validation(`Unknown event_type: ${body.event_type}`, {
           allowed: deps.webhooks.eventTypes(),
         });
+      }
+      // SSRF guard: reject loopback / link-local / private / metadata targets so an
+      // app can't make the server fetch internal addresses on delivery/replay.
+      try {
+        await assertPublicHttpUrl(body.target_url, { allowPrivate: allowPrivateTargets() });
+      } catch (e) {
+        throw ApiError.validation(e instanceof Error ? e.message : 'target_url not allowed');
       }
       const { subscription, signing_secret } = await deps.webhooks.createSubscription({
         appId: requireApp(req),
