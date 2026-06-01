@@ -4,6 +4,7 @@
  */
 import { Http } from './http.js';
 import { DocumentsClient } from './resources/documents.js';
+import { WebhooksClient } from './resources/webhooks.js';
 import { InMemoryTokenStore, type ITokenStore } from './token-store.js';
 import { runDeviceLogin, type DeviceLoginOptions } from './auth/device.js';
 import type { MeResponse } from './types.js';
@@ -23,12 +24,14 @@ export interface ShipClientOptions {
 export class ShipClient {
   private readonly http: Http;
   readonly documents: DocumentsClient;
+  readonly webhooks: WebhooksClient;
 
   constructor(opts: ShipClientOptions = {}) {
     const origin = (opts.baseUrl ?? 'http://localhost:3000').replace(/\/$/, '');
     const tokenStore = opts.tokenStore ?? new InMemoryTokenStore(opts.token ? { access_token: opts.token } : undefined);
     this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret });
     this.documents = new DocumentsClient(this.http);
+    this.webhooks = new WebhooksClient(this.http);
   }
 
   /** The authenticated principal (user for delegated tokens, app for client-credentials). */

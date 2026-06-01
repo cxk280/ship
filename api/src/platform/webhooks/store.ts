@@ -7,6 +7,7 @@ import type { EventType } from './events.js';
 export interface SubscriptionRow {
   id: string;
   app_id: string;
+  workspace_id: string | null;
   event_type: string;
   target_url: string;
   signing_secret: string;
@@ -43,14 +44,15 @@ export interface EventRow {
 
 export async function createSubscription(input: {
   appId: string;
+  workspaceId: string | null;
   eventType: EventType;
   targetUrl: string;
   signingSecret: string;
 }): Promise<SubscriptionRow> {
   const r = await pool.query(
-    `INSERT INTO webhook_subscriptions (app_id, event_type, target_url, signing_secret)
-     VALUES ($1,$2,$3,$4) RETURNING *`,
-    [input.appId, input.eventType, input.targetUrl, input.signingSecret],
+    `INSERT INTO webhook_subscriptions (app_id, workspace_id, event_type, target_url, signing_secret)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [input.appId, input.workspaceId, input.eventType, input.targetUrl, input.signingSecret],
   );
   return r.rows[0] as SubscriptionRow;
 }
@@ -77,11 +79,14 @@ export async function getMatchingSubscriptions(
   eventType: string,
   workspaceId: string | null,
 ): Promise<SubscriptionRow[]> {
+  // Match on the SUBSCRIPTION's workspace (the workspace of the token that created
+  // it), not the app's — so a multi-workspace app (e.g. the CLI) only receives the
+  // events of the workspace each subscription was created in.
   const r = await pool.query(
     `SELECT s.* FROM webhook_subscriptions s
      JOIN oauth_apps a ON s.app_id = a.id
      WHERE s.event_type = $1 AND s.active = TRUE AND a.is_active = TRUE
-       AND ($2::uuid IS NULL OR a.workspace_id = $2)`,
+       AND s.workspace_id IS NOT DISTINCT FROM $2`,
     [eventType, workspaceId],
   );
   return r.rows as SubscriptionRow[];

@@ -82,7 +82,7 @@ export interface PublicDelivery {
 export interface WebhooksPort {
   /** Allowed event types (for validation + the consent/portal UI). */
   eventTypes(): string[];
-  createSubscription(input: { appId: string; eventType: string; targetUrl: string }): Promise<{
+  createSubscription(input: { appId: string; workspaceId: string | null; eventType: string; targetUrl: string }): Promise<{
     subscription: PublicSubscription;
     signing_secret: string;
   }>;

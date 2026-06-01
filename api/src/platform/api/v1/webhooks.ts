@@ -45,6 +45,7 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
       }
       const { subscription, signing_secret } = await deps.webhooks.createSubscription({
         appId: requireApp(req),
+        workspaceId: req.platformAuth?.workspaceId ?? null,
         eventType: body.event_type,
         targetUrl: body.target_url,
       });

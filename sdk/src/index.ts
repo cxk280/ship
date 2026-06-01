@@ -6,6 +6,12 @@
  */
 export { ShipClient, type ShipClientOptions } from './client.js';
 export { DocumentsClient } from './resources/documents.js';
+export {
+  WebhooksClient,
+  type WebhookSubscription,
+  type CreatedSubscription,
+  type WebhookDelivery,
+} from './resources/webhooks.js';
 export { ShipError, type ShipErrorKind } from './errors.js';
 export {
   InMemoryTokenStore,

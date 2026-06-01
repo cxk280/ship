@@ -27,7 +27,7 @@ async function setup(): Promise<{ workspaceId: string; appId: string; sub: wstor
     ownerUserId: u.rows[0].id, workspaceId,
   });
   const sub = await wstore.createSubscription({
-    appId: app.id, eventType: 'document.created', targetUrl: 'https://sub.example.com/hook',
+    appId: app.id, workspaceId, eventType: 'document.created', targetUrl: 'https://sub.example.com/hook',
     signingSecret: 'whsec_test_secret',
   });
   return { workspaceId, appId: app.id, sub };

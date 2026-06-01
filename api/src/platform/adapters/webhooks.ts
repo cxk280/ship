@@ -28,6 +28,7 @@ export function createWebhooksAdapter(bus: InMemoryEventBus): WebhooksPort {
       const signing_secret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
       const row = await store.createSubscription({
         appId: input.appId,
+        workspaceId: input.workspaceId,
         eventType: input.eventType as EventType,
         targetUrl: input.targetUrl,
         signingSecret: signing_secret,
