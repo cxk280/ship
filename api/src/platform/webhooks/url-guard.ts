@@ -52,8 +52,14 @@ export function isPrivateIp(ip: string): boolean {
   }
 
   if (lower === '::1' || lower === '::') return true; // loopback / unspecified
-  if (lower.startsWith('fe80')) return true; // link-local
-  if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // unique-local
+  // Classify by the leading 16-bit group so whole ranges are covered:
+  //   fe80::/10 link-local (fe80–febf), fc00::/7 unique-local (fc00–fdff).
+  const fh = lower.startsWith('::') ? 0 : parseInt(lower.split(':')[0] ?? '', 16);
+  if (!Number.isNaN(fh)) {
+    if (fh >= 0xfe80 && fh <= 0xfebf) return true; // link-local
+    if (fh >= 0xfc00 && fh <= 0xfdff) return true; // unique-local
+    if (fh >= 0xfec0 && fh <= 0xfeff) return true; // deprecated site-local (block too)
+  }
   return false;
 }
 

@@ -3,7 +3,8 @@ import { isPrivateIp, assertPublicHttpUrl } from '../url-guard.js';
 
 describe('isPrivateIp', () => {
   it('flags loopback, link-local/metadata, RFC1918, CGNAT, and IPv6 private', () => {
-    for (const ip of ['127.0.0.1', '169.254.169.254', '10.0.0.5', '172.16.0.1', '192.168.1.1', '100.64.0.1', '::1', 'fe80::1', 'fd00::1']) {
+    for (const ip of ['127.0.0.1', '169.254.169.254', '10.0.0.5', '172.16.0.1', '192.168.1.1', '100.64.0.1',
+      '::1', 'fe80::1', 'fe90::1', 'febf::1', 'fc00::1', 'fd00::1', 'fec0::1']) {
       expect(isPrivateIp(ip), ip).toBe(true);
     }
   });
