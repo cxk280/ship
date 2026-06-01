@@ -39,6 +39,7 @@ import { documentCommentsRouter, commentsRouter } from './routes/comments.js';
 import fleetgraphRoutes from './routes/fleetgraph.js';
 import { setupSwagger } from './swagger.js';
 import { initializeCAIA } from './services/caia.js';
+import { buildPlatform } from './platform/composition.js';
 
 // Validate SESSION_SECRET in production
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -82,12 +83,16 @@ const loginLimiter = rateLimit({
 });
 
 // General API rate limit (100 req/min in prod, 1000 in dev)
+// NOTE: This is the INTERNAL API's IP-based limiter. The public `/api/v1` edge
+// shares NO middleware with the internal API (the one-way-door boundary), so it
+// is skipped here and gets its own token-bucket limiter inside the platform.
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: isTestEnv ? 10000 : isDevEnv ? 1000 : 100, // High limit for tests/dev
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests. Please slow down.' },
+  skip: (req) => req.path.startsWith('/v1'), // mounted under '/api/', so v1 path is '/v1/...'
 });
 
 
@@ -178,6 +183,14 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // API documentation (no auth needed)
   setupSwagger(app);
+
+  // ----------------------------------------------------------------------------
+  // PUBLIC PLATFORM EDGE — `/api/v1`
+  // A fresh router with its OWN pipeline (request-id → bearer auth → scope →
+  // rate-limit → audit → handler). It shares no request-handling middleware with
+  // the internal `/api/*` routes below. Wired in the composition root.
+  // ----------------------------------------------------------------------------
+  app.use('/api/v1', buildPlatform().v1Router);
 
   // Setup routes (CSRF protected - first-time setup only)
   app.use('/api/setup', conditionalCsrf, setupRoutes);
