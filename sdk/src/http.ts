@@ -16,6 +16,8 @@ export interface HttpConfig {
 }
 
 export class Http {
+  private refreshPromise: Promise<boolean> | undefined;
+
   constructor(private readonly cfg: HttpConfig) {}
 
   get apiBase(): string {
@@ -51,7 +53,7 @@ export class Http {
       throw ShipError.network(e instanceof Error ? e.message : 'network error');
     }
 
-    if (res.status === 401 && !opts._retried && (await this.tryRefresh())) {
+    if (res.status === 401 && !opts._retried && (await this.tryRefresh(stored?.access_token))) {
       return this.request<T>(method, path, { ...opts, _retried: true });
     }
 
@@ -69,14 +71,30 @@ export class Http {
     return (await res.json()) as T;
   }
 
-  /** Attempt a one-time refresh-token rotation. Returns true if a new token was stored. */
-  private async tryRefresh(): Promise<boolean> {
+  /**
+   * Attempt a one-time refresh-token rotation. Concurrent 401s share the same
+   * refresh so rotated refresh tokens are never submitted more than once.
+   */
+  private async tryRefresh(failedAccessToken?: string): Promise<boolean> {
     const stored = await this.cfg.tokenStore.get();
-    if (!stored?.refresh_token || !this.cfg.clientId) return false;
+    if (stored?.access_token && failedAccessToken && stored.access_token !== failedAccessToken) {
+      return true;
+    }
+    const clientId = this.cfg.clientId;
+    const refreshToken = stored?.refresh_token;
+    if (!refreshToken || !clientId) return false;
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = this.performRefresh(refreshToken, clientId).finally(() => {
+      this.refreshPromise = undefined;
+    });
+    return this.refreshPromise;
+  }
+
+  private async performRefresh(refreshToken: string, clientId: string): Promise<boolean> {
     const form = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: stored.refresh_token,
-      client_id: this.cfg.clientId,
+      refresh_token: refreshToken,
+      client_id: clientId,
     });
     if (this.cfg.clientSecret) form.set('client_secret', this.cfg.clientSecret);
     try {
@@ -97,7 +115,7 @@ export class Http {
       };
       await this.cfg.tokenStore.set({
         access_token: t.access_token,
-        refresh_token: t.refresh_token ?? stored.refresh_token,
+        refresh_token: t.refresh_token ?? refreshToken,
         expires_at: t.expires_in ? Date.now() + t.expires_in * 1000 : undefined,
         scope: t.scope,
       });
