@@ -80,7 +80,7 @@ export async function getMatchingSubscriptions(
   const r = await pool.query(
     `SELECT s.* FROM webhook_subscriptions s
      JOIN oauth_apps a ON s.app_id = a.id
-     WHERE s.event_type = $1 AND s.active = TRUE
+     WHERE s.event_type = $1 AND s.active = TRUE AND a.is_active = TRUE
        AND ($2::uuid IS NULL OR a.workspace_id = $2)`,
     [eventType, workspaceId],
   );

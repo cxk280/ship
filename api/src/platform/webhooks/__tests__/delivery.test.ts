@@ -136,6 +136,17 @@ describe('DLQ + replay (scenario 7)', () => {
     expect(replayed!.status).toBe('delivered');
   });
 
+  it('does NOT deliver to subscriptions owned by a DEACTIVATED app', async () => {
+    const { workspaceId, appId } = await setup();
+    await ostore.deactivateApp(appId); // app disabled after subscribing
+    const clock = new TestClock();
+    const transport = scriptedTransport([200]);
+    const bus = new InMemoryEventBus({ deliverer: new QueueWebhookDeliverer({ clock, transport, jitter: () => 0 }), clock });
+    await bus.publish(eventFor(workspaceId));
+    await clock.advance(0);
+    expect(transport.calls).toHaveLength(0); // no fan-out to a dead app
+  });
+
   it('treats a 4xx as permanent and dead-letters immediately', async () => {
     const { workspaceId, appId } = await setup();
     const clock = new TestClock();
