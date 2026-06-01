@@ -58,3 +58,38 @@ export interface DocumentsPort {
     properties?: Record<string, unknown>;
   }): Promise<PublicDocument>;
 }
+
+export interface PublicSubscription {
+  id: string;
+  event_type: string;
+  target_url: string;
+  active: boolean;
+  created_at: string;
+}
+
+export interface PublicDelivery {
+  id: string;
+  event_type: string;
+  attempt_number: number;
+  status: string;
+  response_status: number | null;
+  latency_ms: number | null;
+  idempotency_key: string;
+  created_at: string;
+}
+
+/** Webhook subscription management + delivery log (implemented by an adapter). */
+export interface WebhooksPort {
+  /** Allowed event types (for validation + the consent/portal UI). */
+  eventTypes(): string[];
+  createSubscription(input: { appId: string; eventType: string; targetUrl: string }): Promise<{
+    subscription: PublicSubscription;
+    signing_secret: string;
+  }>;
+  listSubscriptions(appId: string): Promise<PublicSubscription[]>;
+  /** Returns false if the subscription isn't owned by the app. */
+  deactivateSubscription(input: { appId: string; id: string }): Promise<boolean>;
+  listDeliveries(appId: string): Promise<PublicDelivery[]>;
+  /** Returns false if the delivery isn't owned by the app. */
+  replay(input: { appId: string; deliveryId: string }): Promise<boolean>;
+}

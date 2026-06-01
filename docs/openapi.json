@@ -203,6 +203,129 @@
           "scopes",
           "workspace_id"
         ]
+      },
+      "CreateSubscription": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "document.created",
+              "document.updated",
+              "document.deleted",
+              "issue.created",
+              "issue.assigned",
+              "issue.status_changed",
+              "sprint.started",
+              "sprint.completed"
+            ]
+          },
+          "target_url": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "event_type",
+          "target_url"
+        ]
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "target_url",
+          "active",
+          "created_at"
+        ]
+      },
+      "CreatedWebhookSubscription": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookSubscription"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "signing_secret": {
+                "type": "string",
+                "description": "Shown once. Save it to verify deliveries."
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signing_secret",
+              "warning"
+            ]
+          }
+        ]
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "attempt_number": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "response_status": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "latency_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "attempt_number",
+          "status",
+          "response_status",
+          "latency_ms",
+          "idempotency_key",
+          "created_at"
+        ]
       }
     },
     "parameters": {}
@@ -436,6 +559,332 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope (names the missing scope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks": {
+      "post": {
+        "summary": "Create a webhook subscription",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscription"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Subscription created; signing_secret shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedWebhookSubscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope (names the missing scope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List webhook subscriptions",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subscriptions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookSubscription"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope (names the missing scope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "delete": {
+        "summary": "Delete a webhook subscription",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope (names the missing scope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/deliveries": {
+      "get": {
+        "summary": "List webhook deliveries",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delivery log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WebhookDelivery"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient scope (names the missing scope)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/deliveries/{id}/replay": {
+      "post": {
+        "summary": "Replay a webhook delivery",
+        "tags": [
+          "webhooks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Replay accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "delivery_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "delivery_id"
+                  ]
                 }
               }
             }

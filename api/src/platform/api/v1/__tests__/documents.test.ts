@@ -12,8 +12,9 @@ import * as store from '../../../oauth/store.js';
 import { hashClientSecret, sha256, generate } from '../../../oauth/crypto.js';
 import { bearerAuth } from '../../../oauth/bearer.js';
 import { identityAdapter } from '../../../adapters/identity.js';
-import { documentsAdapter } from '../../../adapters/documents.js';
+import { createDocumentsAdapter } from '../../../adapters/documents.js';
 import { createV1Router } from '../router.js';
+import { stubWebhooks, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
 
 let workspaceId: string;
 let userId: string;
@@ -21,11 +22,12 @@ let appId: string;
 
 // Rate limiting is exercised in its own unit test; here it's a pass-through.
 const noRateLimit = (_req: unknown, _res: unknown, next: () => void) => next();
+const documentsAdapter = createDocumentsAdapter(noopBus);
 
 function v1App() {
   const a = express();
   a.use(express.json());
-  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, webhooks: stubWebhooks }));
   return a;
 }
 

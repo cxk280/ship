@@ -17,6 +17,10 @@ const stubDeps: PlatformDeps = {
   rateLimit: (_req, _res, next) => next(),
   identity: { getUser: vi.fn() },
   documents: { list: vi.fn(), get: vi.fn(), create: vi.fn() },
+  webhooks: {
+    eventTypes: () => [], createSubscription: vi.fn(), listSubscriptions: vi.fn(),
+    deactivateSubscription: vi.fn(), listDeliveries: vi.fn(), replay: vi.fn(),
+  },
 };
 
 function app() {
