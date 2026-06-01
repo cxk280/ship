@@ -156,8 +156,13 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     origin: corsOrigin,
     credentials: true,
   }));
-  app.use(express.json({ limit: '10mb' }));  // Large wiki documents can be several MB
-  app.use(express.urlencoded({ extended: true, limit: '10mb' })); // For HTML form submissions
+  // Internal API body parsing. The public `/api/v1` edge parses its OWN body
+  // inside its router (so parse errors ship the ApiError shape with a request id),
+  // so these global parsers skip it — the one-way-door boundary again.
+  const skipV1 = (parser: express.RequestHandler): express.RequestHandler => (req, res, next) =>
+    req.path.startsWith('/api/v1') ? next() : parser(req, res, next);
+  app.use(skipV1(express.json({ limit: '10mb' })));  // Large wiki documents can be several MB
+  app.use(skipV1(express.urlencoded({ extended: true, limit: '10mb' }))); // For HTML form submissions
   app.use(cookieParser(sessionSecret));
 
   // Session middleware for CSRF token storage
