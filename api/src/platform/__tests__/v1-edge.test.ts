@@ -14,6 +14,7 @@ const stubDeps: PlatformDeps = {
   // Edge-contract tests only exercise unmatched routes, so the stub deps are
   // never actually invoked.
   bearerAuth: (_req, _res, next) => next(),
+  rateLimit: (_req, _res, next) => next(),
   identity: { getUser: vi.fn() },
   documents: { list: vi.fn(), get: vi.fn(), create: vi.fn() },
 };

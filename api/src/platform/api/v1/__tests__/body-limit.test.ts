@@ -23,6 +23,8 @@ const identity: IdentityPort = {
   },
 };
 
+const noRateLimit: RequestHandler = (_req, _res, next) => next();
+
 function publicDoc(content: unknown): PublicDocument {
   return {
     id: '00000000-0000-4000-8000-000000000001',
@@ -38,7 +40,7 @@ function publicDoc(content: unknown): PublicDocument {
 
 function v1App(documents: DocumentsPort) {
   const app = express();
-  app.use('/api/v1', createV1Router({ bearerAuth, identity, documents }));
+  app.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity, documents }));
   return app;
 }
 

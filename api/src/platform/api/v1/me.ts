@@ -18,7 +18,7 @@ publicRoutes.register({ method: 'get', path: '/me', scope: null, paginated: fals
 export function createMeRouter(deps: PlatformDeps): Router {
   const router = Router();
 
-  router.get('/', deps.bearerAuth, async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const auth = req.platformAuth!;
       const user = auth.userId ? await deps.identity.getUser(auth.userId) : null;

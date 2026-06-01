@@ -34,6 +34,8 @@ export interface PlatformDeps {
    * token and populates req.platformAuth.
    */
   bearerAuth: RequestHandler;
+  /** Per-app + per-token rate limiting for the public edge. */
+  rateLimit: RequestHandler;
   /** Identity lookups (e.g. for /me). */
   identity: IdentityPort;
   /** Documents domain operations. */
@@ -54,13 +56,21 @@ export function createV1Router(deps: PlatformDeps): Router {
   // internal 10mb so large document `content` (multi-MB wikis) is still accepted.
   router.use(json({ limit: '10mb' }));
 
-  // Public, unauthenticated: the generated OpenAPI 3.1 spec.
+  // Public, unauthenticated: the generated OpenAPI 3.1 spec (must stay reachable
+  // without a token, so it sits BEFORE the auth + rate-limit gate).
   router.get('/openapi.json', (_req, res) => {
     res.json(getV1OpenApiDocument());
   });
 
-  // Resource routers. Each authenticated route runs deps.bearerAuth then
-  // requireScope(...). /me is identity (auth only, no specific scope).
+  // The public-edge gate, applied to every resource route in one place (the deck's
+  // chain): authN → rate-limit → [requireScope per route] → handler. Keeping it
+  // here (not per-route) is why a route can't accidentally ship unauthenticated
+  // or unthrottled.
+  router.use(deps.bearerAuth);
+  router.use(deps.rateLimit);
+
+  // Resource routers. Each route declares its scope via requireScope(...); /me is
+  // identity (auth only, no specific scope).
   router.use('/me', createMeRouter(deps));
   router.use('/documents', createDocumentsRouter(deps));
 

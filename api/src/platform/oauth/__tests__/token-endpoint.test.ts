@@ -21,12 +21,14 @@ let workspaceId: string;
 let userId: string;
 let app: store.OAuthAppRow;
 
+const noRateLimit = (_req: unknown, _res: unknown, next: () => void) => next();
+
 function testApp() {
   const a = express();
   a.use(express.json());
   a.use(express.urlencoded({ extended: true }));
   a.use('/oauth', createOAuthRouter());
-  a.use('/api/v1', createV1Router({ bearerAuth, identity: identityAdapter, documents: documentsAdapter }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter }));
   return a;
 }
 

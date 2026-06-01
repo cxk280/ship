@@ -31,7 +31,6 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
   // GET /api/v1/documents — cursor-paginated list.
   router.get(
     '/',
-    deps.bearerAuth,
     requireScope(SCOPES.DOCUMENTS_READ),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -52,7 +51,6 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
   // GET /api/v1/documents/:id
   router.get(
     '/:id',
-    deps.bearerAuth,
     requireScope(SCOPES.DOCUMENTS_READ),
     async (req: Request, res: Response, next: NextFunction) => {
       try {
@@ -74,7 +72,6 @@ export function createDocumentsRouter(deps: PlatformDeps): Router {
   // POST /api/v1/documents
   router.post(
     '/',
-    deps.bearerAuth,
     requireScope(SCOPES.DOCUMENTS_WRITE),
     async (req: Request, res: Response, next: NextFunction) => {
       try {

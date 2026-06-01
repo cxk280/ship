@@ -19,10 +19,13 @@ let workspaceId: string;
 let userId: string;
 let appId: string;
 
+// Rate limiting is exercised in its own unit test; here it's a pass-through.
+const noRateLimit = (_req: unknown, _res: unknown, next: () => void) => next();
+
 function v1App() {
   const a = express();
   a.use(express.json());
-  a.use('/api/v1', createV1Router({ bearerAuth, identity: identityAdapter, documents: documentsAdapter }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter }));
   return a;
 }
 
