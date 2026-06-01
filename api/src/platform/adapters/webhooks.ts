@@ -54,7 +54,9 @@ export function createWebhooksAdapter(bus: InMemoryEventBus): WebhooksPort {
       const delivery = await store.getDelivery(deliveryId);
       if (!delivery) return false;
       const sub = await store.getSubscription(delivery.subscription_id);
-      if (!sub || sub.app_id !== appId) return false;
+      // Must be owned by the app AND still active — a deleted (deactivated)
+      // subscription must not be re-used to send to its old target.
+      if (!sub || sub.app_id !== appId || !sub.active) return false;
       const fresh = await bus.replay(deliveryId);
       return fresh !== null;
     },

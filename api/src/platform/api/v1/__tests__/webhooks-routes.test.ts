@@ -119,4 +119,22 @@ describe('end-to-end: subscribe → create document → signed delivery → repl
       .set('Authorization', `Bearer ${token}`).send({});
     expect(replay.status).toBe(202);
   });
+
+  it('refuses to replay a delivery whose subscription was deleted', async () => {
+    const token = await mintToken(['webhooks:manage', 'documents:write']);
+    const app = v1App();
+    const sub = await request(app).post('/api/v1/webhooks').set('Authorization', `Bearer ${token}`)
+      .send({ event_type: 'document.created', target_url: 'https://sub2.example.com/hook' }).expect(201);
+    await request(app).post('/api/v1/documents').set('Authorization', `Bearer ${token}`)
+      .send({ title: 'doc', document_type: 'wiki' }).expect(201);
+    await tick();
+    const deliveries = await request(app).get('/api/v1/webhooks/deliveries').set('Authorization', `Bearer ${token}`);
+    const d = deliveries.body.data[0];
+
+    await request(app).delete(`/api/v1/webhooks/${sub.body.id}`).set('Authorization', `Bearer ${token}`).expect(200);
+
+    const replay = await request(app).post(`/api/v1/webhooks/deliveries/${d.id}/replay`)
+      .set('Authorization', `Bearer ${token}`).send({});
+    expect(replay.status).toBe(404); // deleted subscription can't be replayed
+  });
 });
