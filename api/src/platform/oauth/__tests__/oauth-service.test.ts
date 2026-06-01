@@ -146,6 +146,13 @@ describe('refresh_token rotation + theft detection', () => {
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
     expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+
+    const winner = fulfilled[0] as PromiseFulfilledResult<{ refresh_token?: string }>;
+    const replacement = await store.getRefreshTokenByHash(sha256(winner.value.refresh_token!));
+    expect(replacement?.revoked_at).toBeTruthy();
+    await expect(
+      service.refresh({ app: confidentialApp, refreshToken: winner.value.refresh_token! }),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
   });
 
   it('reusing a CONSUMED refresh token revokes the whole family', async () => {

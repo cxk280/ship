@@ -204,6 +204,28 @@ export async function touchAccessToken(id: string): Promise<void> {
 
 // ---- refresh tokens -------------------------------------------------------
 
+export interface RefreshRotationInput {
+  oldRefreshTokenId: string;
+  accessToken: {
+    tokenHash: string;
+    appId: string;
+    userId: string;
+    workspaceId: string | null;
+    scopes: string[];
+    grantType: string;
+    expiresAt: Date;
+  };
+  refreshToken: {
+    tokenHash: string;
+    appId: string;
+    userId: string;
+    workspaceId: string | null;
+    scopes: string[];
+    familyId: string;
+    expiresAt: Date;
+  };
+}
+
 export async function insertRefreshToken(input: {
   tokenHash: string;
   appId: string;
@@ -226,33 +248,74 @@ export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshT
   return (r.rows[0] as RefreshTokenRow) ?? null;
 }
 
-export async function consumeRefreshToken(id: string, replacedBy: string): Promise<void> {
-  await pool.query(
-    'UPDATE oauth_refresh_tokens SET consumed_at = now(), replaced_by = $2 WHERE id = $1',
-    [id, replacedBy],
-  );
-}
-
 /**
- * Atomically claim a refresh token for rotation: marks it consumed ONLY if it is
- * still unconsumed and unrevoked, returning true iff THIS call won the claim.
- * Two concurrent refreshes with the same token serialize on the row lock, so
- * exactly one wins — closing the read-check-then-consume race (one-time-use holds).
+ * Atomically rotate a refresh token and mint its replacement. The old-token claim
+ * holds a row lock until the access token, replacement refresh token, and
+ * `replaced_by` link are all committed. A concurrent duplicate refresh therefore
+ * cannot revoke the family before the replacement row exists.
  */
-export async function claimRefreshToken(id: string): Promise<boolean> {
-  const r = await pool.query(
-    `UPDATE oauth_refresh_tokens
-       SET consumed_at = now()
-     WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
-     RETURNING id`,
-    [id],
-  );
-  return (r.rowCount ?? 0) === 1;
-}
+export async function rotateRefreshToken(input: RefreshRotationInput): Promise<RefreshTokenRow | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-/** Best-effort bookkeeping: link a consumed token to its replacement. */
-export async function setRefreshReplacedBy(id: string, replacedBy: string): Promise<void> {
-  await pool.query('UPDATE oauth_refresh_tokens SET replaced_by = $2 WHERE id = $1', [id, replacedBy]);
+    const claim = await client.query(
+      `UPDATE oauth_refresh_tokens
+         SET consumed_at = now()
+       WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+       RETURNING id`,
+      [input.oldRefreshTokenId],
+    );
+    if ((claim.rowCount ?? 0) !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await client.query(
+      `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        input.accessToken.tokenHash,
+        input.accessToken.appId,
+        input.accessToken.userId,
+        input.accessToken.workspaceId,
+        input.accessToken.scopes,
+        input.accessToken.grantType,
+        input.accessToken.expiresAt,
+      ],
+    );
+
+    const refresh = await client.query(
+      `INSERT INTO oauth_refresh_tokens (token_hash, app_id, user_id, workspace_id, scopes, family_id, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING *`,
+      [
+        input.refreshToken.tokenHash,
+        input.refreshToken.appId,
+        input.refreshToken.userId,
+        input.refreshToken.workspaceId,
+        input.refreshToken.scopes,
+        input.refreshToken.familyId,
+        input.refreshToken.expiresAt,
+      ],
+    );
+    const row = refresh.rows[0] as RefreshTokenRow;
+
+    await client.query(
+      'UPDATE oauth_refresh_tokens SET replaced_by = $2 WHERE id = $1',
+      [input.oldRefreshTokenId, row.id],
+    );
+
+    await client.query('COMMIT');
+    return row;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {
+      /* ignore rollback failure */
+    });
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Theft response: revoke every refresh token in the family. */

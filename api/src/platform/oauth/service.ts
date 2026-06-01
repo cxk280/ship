@@ -208,29 +208,44 @@ export async function refresh(input: {
     scopes = input.requestedScopes;
   }
 
-  // ATOMICALLY claim the token before minting. Two concurrent refreshes with the
-  // same token serialize on the row lock; exactly one wins. The loser (which is
-  // indistinguishable from token reuse) triggers the theft response. This closes
-  // the read-check-then-consume race that would otherwise let both mint.
-  const won = await store.claimRefreshToken(row.id);
-  if (!won) {
+  // Atomically claim the old refresh token and mint its replacement in one
+  // transaction. The row lock stays held until the replacement exists, so a
+  // racing duplicate's family revoke cannot miss the freshly-issued token.
+  const accessRaw = generate.accessToken();
+  const refreshRaw = generate.refreshToken();
+  const rotated = await store.rotateRefreshToken({
+    oldRefreshTokenId: row.id,
+    accessToken: {
+      tokenHash: sha256(accessRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes,
+      grantType: 'refresh_token',
+      expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+    },
+    refreshToken: {
+      tokenHash: sha256(refreshRaw),
+      appId: input.app.id,
+      userId: row.user_id,
+      workspaceId: row.workspace_id,
+      scopes,
+      familyId: row.family_id,
+      expiresAt: new Date(Date.now() + TTL.refreshSec * 1000),
+    },
+  });
+  if (!rotated) {
     await store.revokeRefreshFamily(row.family_id);
     throw new OAuthError('invalid_grant', 'Refresh token reuse detected — token family revoked');
   }
 
-  // Mint the new pair in the SAME family, then link the rotation (bookkeeping).
-  const next = await mintTokens({
-    app: input.app,
-    userId: row.user_id,
-    workspaceId: row.workspace_id,
-    scopes,
-    grantType: 'refresh_token',
-    withRefresh: true,
-    familyId: row.family_id,
-  });
-  const newRow = await store.getRefreshTokenByHash(sha256(next.refresh_token!));
-  await store.setRefreshReplacedBy(row.id, newRow!.id);
-  return next;
+  return {
+    access_token: accessRaw,
+    token_type: 'Bearer',
+    expires_in: TTL.accessSec,
+    refresh_token: refreshRaw,
+    scope: scopes.join(' '),
+  };
 }
 
 // ---- client credentials (first-party M2M — the agent) ---------------------
