@@ -14,6 +14,7 @@ import { createOAuthRouter } from '../routes.js';
 import { createV1Router } from '../../api/v1/router.js';
 import { bearerAuth } from '../bearer.js';
 import { identityAdapter } from '../../adapters/identity.js';
+import { documentsAdapter } from '../../adapters/documents.js';
 
 const SECRET = 'ship_secret_http_known';
 let workspaceId: string;
@@ -25,7 +26,7 @@ function testApp() {
   a.use(express.json());
   a.use(express.urlencoded({ extended: true }));
   a.use('/oauth', createOAuthRouter());
-  a.use('/api/v1', createV1Router({ bearerAuth, identity: identityAdapter }));
+  a.use('/api/v1', createV1Router({ bearerAuth, identity: identityAdapter, documents: documentsAdapter }));
   return a;
 }
 

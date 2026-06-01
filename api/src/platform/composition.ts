@@ -14,6 +14,7 @@ import type { Router } from 'express';
 import { createV1Router, type PlatformDeps } from './api/v1/router.js';
 import { bearerAuth } from './oauth/bearer.js';
 import { identityAdapter } from './adapters/identity.js';
+import { documentsAdapter } from './adapters/documents.js';
 
 // Import './types.js' for its side-effecting Express.Request augmentation
 // (requestId, platformAuth) so every consumer sees the public-edge fields.
@@ -36,6 +37,7 @@ export function buildPlatform(): Platform {
   const deps: PlatformDeps = {
     bearerAuth,
     identity: identityAdapter,
+    documents: documentsAdapter,
   };
   const v1Router = createV1Router(deps);
   return { v1Router };

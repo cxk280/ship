@@ -15,6 +15,7 @@ const stubDeps: PlatformDeps = {
   // never actually invoked.
   bearerAuth: (_req, _res, next) => next(),
   identity: { getUser: vi.fn() },
+  documents: { list: vi.fn(), get: vi.fn(), create: vi.fn() },
 };
 
 function app() {

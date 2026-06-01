@@ -8,7 +8,12 @@
  */
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { ApiError } from '../../errors.js';
+import { publicRoutes } from './route-meta.js';
 import type { PlatformDeps } from './router.js';
+
+// Identity route: explicitly opts out of a scope (auth-only). The fitness test
+// recognizes scope:null as a deliberate exemption, not a missing declaration.
+publicRoutes.register({ method: 'get', path: '/me', scope: null, paginated: false, summary: 'Get the authenticated principal' });
 
 export function createMeRouter(deps: PlatformDeps): Router {
   const router = Router();

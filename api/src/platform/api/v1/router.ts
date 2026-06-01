@@ -13,8 +13,9 @@
  */
 import { Router, type RequestHandler } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
-import type { IdentityPort } from './ports.js';
+import type { IdentityPort, DocumentsPort } from './ports.js';
 import { createMeRouter } from './me.js';
+import { createDocumentsRouter } from './documents.js';
 
 /**
  * Collaborators injected by the composition root. Grows slice by slice
@@ -29,6 +30,8 @@ export interface PlatformDeps {
   bearerAuth: RequestHandler;
   /** Identity lookups (e.g. for /me). */
   identity: IdentityPort;
+  /** Documents domain operations. */
+  documents: DocumentsPort;
 }
 
 export function createV1Router(deps: PlatformDeps): Router {
@@ -41,7 +44,7 @@ export function createV1Router(deps: PlatformDeps): Router {
   // Resource routers. Each authenticated route runs deps.bearerAuth then
   // requireScope(...). /me is identity (auth only, no specific scope).
   router.use('/me', createMeRouter(deps));
-  // Slice 3 adds: router.use('/documents', createDocumentsRouter(deps)); etc.
+  router.use('/documents', createDocumentsRouter(deps));
 
   // Terminal handlers — must come last, in this order.
   router.use(publicNotFoundHandler);
