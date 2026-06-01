@@ -11,7 +11,7 @@
  * collaborators (domain services, bearer auth) arrive via injected `deps`, wired
  * in the composition root (platform/composition.ts → app.ts).
  */
-import { Router, type RequestHandler } from 'express';
+import { Router, json, type RequestHandler } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
 import type { IdentityPort, DocumentsPort } from './ports.js';
 import { createMeRouter } from './me.js';
@@ -46,6 +46,13 @@ export function createV1Router(deps: PlatformDeps): Router {
   // Every public request gets a request id (echoed as X-Request-Id, used by the
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
+
+  // The public edge owns its OWN body parsing — so a malformed body throws
+  // INSIDE this router (after the request id is set) and is caught by the v1
+  // apiErrorHandler below, guaranteeing the ApiError shape even on parse errors.
+  // (The internal /api parser skips /api/v1; see app.ts.) Limit matches the
+  // internal 10mb so large document `content` (multi-MB wikis) is still accepted.
+  router.use(json({ limit: '10mb' }));
 
   // Public, unauthenticated: the generated OpenAPI 3.1 spec.
   router.get('/openapi.json', (_req, res) => {

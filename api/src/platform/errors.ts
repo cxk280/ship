@@ -141,8 +141,52 @@ export function apiErrorHandler(
     return;
   }
 
+  // body-parser / http-errors (malformed JSON, payload too large, etc.) carry a
+  // numeric status + a `type`. Map client-side parse failures to validation_failed
+  // so a bad body still ships the ApiError shape — never Express' default HTML.
+  const httpStatus = readHttpStatus(err);
+  if (httpStatus !== null) {
+    const mapped = mapStatusToApiError(httpStatus, err);
+    res.status(mapped.status).json(mapped.toBody(requestId));
+    return;
+  }
+
   // Unknown / unexpected: log server-side, return an opaque server_error.
   console.error(`[api/v1] unhandled error (request_id=${requestId}):`, err);
   const apiErr = ApiError.server();
   res.status(apiErr.status).json(apiErr.toBody(requestId));
+}
+
+/** Read a numeric HTTP status off an http-errors-style error, if present. */
+function readHttpStatus(err: unknown): number | null {
+  if (err && typeof err === 'object') {
+    const s = (err as { status?: unknown; statusCode?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode;
+    if (typeof s === 'number' && s >= 400 && s <= 599) return s;
+  }
+  // A bare SyntaxError from JSON.parse (older body-parser) with no status.
+  if (err instanceof SyntaxError) return 400;
+  return null;
+}
+
+/** Map an arbitrary http error status to the closed ApiError code set. */
+function mapStatusToApiError(status: number, err: unknown): ApiError {
+  const message = err instanceof Error && err.message ? err.message : undefined;
+  switch (status) {
+    case 401:
+      return ApiError.unauthorized();
+    case 403:
+      return ApiError.forbidden();
+    case 404:
+      return ApiError.notFound();
+    case 429:
+      return ApiError.rateLimited();
+    case 400:
+    case 413: // payload too large
+    case 414:
+    case 415: // unsupported media type
+    case 422:
+      return ApiError.validation(message ?? 'Invalid request');
+    default:
+      return ApiError.server();
+  }
 }

@@ -25,6 +25,14 @@ function pkcePair() {
   return { verifier, challenge };
 }
 
+async function accessTokenCount(app: store.OAuthAppRow, grantType: string): Promise<number> {
+  const r = await pool.query(
+    `SELECT count(*)::int AS count FROM oauth_access_tokens WHERE app_id = $1 AND grant_type = $2`,
+    [app.id, grantType],
+  );
+  return Number(r.rows[0].count);
+}
+
 beforeAll(async () => {
   const ws = await pool.query(`INSERT INTO workspaces (name) VALUES ('OAuth Test WS') RETURNING id`);
   workspaceId = ws.rows[0].id;
@@ -100,6 +108,38 @@ describe('authorization_code + PKCE', () => {
     ).rejects.toMatchObject({ error: 'invalid_grant' });
   });
 
+  it('two CONCURRENT exchanges with the same code: exactly one wins (atomic consume)', async () => {
+    const { verifier, challenge } = pkcePair();
+    const code = await service.issueAuthorizationCode({
+      app: publicApp, userId, workspaceId, redirectUri: 'https://spa.example.com/callback',
+      scopes: ['documents:read'], codeChallenge: challenge, codeChallengeMethod: 'S256',
+    });
+    const before = await accessTokenCount(publicApp, 'authorization_code');
+
+    const results = await Promise.allSettled([
+      service.exchangeAuthorizationCode({
+        app: publicApp, code, redirectUri: 'https://spa.example.com/callback', codeVerifier: verifier,
+      }),
+      service.exchangeAuthorizationCode({
+        app: publicApp, code, redirectUri: 'https://spa.example.com/callback', codeVerifier: verifier,
+      }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+    await expect(
+      service.exchangeAuthorizationCode({
+        app: publicApp, code, redirectUri: 'https://spa.example.com/callback', codeVerifier: verifier,
+      }),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
+
+    const after = await accessTokenCount(publicApp, 'authorization_code');
+    expect(after - before).toBe(1);
+  });
+
   it('rejects a redirect_uri mismatch with invalid_grant', async () => {
     const { verifier, challenge } = pkcePair();
     const code = await service.issueAuthorizationCode({
@@ -132,6 +172,27 @@ describe('refresh_token rotation + theft detection', () => {
     const next = await service.refresh({ app: confidentialApp, refreshToken: rt });
     expect(next.refresh_token).toBeDefined();
     expect(next.refresh_token).not.toBe(rt);
+  });
+
+  it('two CONCURRENT refreshes with the same token: exactly one wins (atomic rotation)', async () => {
+    const rt = await freshRefresh();
+    const results = await Promise.allSettled([
+      service.refresh({ app: confidentialApp, refreshToken: rt }),
+      service.refresh({ app: confidentialApp, refreshToken: rt }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    // Exactly one mint succeeds; the racing duplicate is treated as reuse.
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+
+    const winner = fulfilled[0] as PromiseFulfilledResult<{ refresh_token?: string }>;
+    const replacement = await store.getRefreshTokenByHash(sha256(winner.value.refresh_token!));
+    expect(replacement?.revoked_at).toBeTruthy();
+    await expect(
+      service.refresh({ app: confidentialApp, refreshToken: winner.value.refresh_token! }),
+    ).rejects.toMatchObject({ error: 'invalid_grant' });
   });
 
   it('reusing a CONSUMED refresh token revokes the whole family', async () => {
@@ -207,6 +268,30 @@ describe('device authorization grant', () => {
     await expect(
       service.pollDeviceToken({ app: confidentialApp, deviceCode: start.device_code }),
     ).rejects.toMatchObject({ error: 'invalid_grant' });
+  });
+
+  it('two CONCURRENT approved polls with the same device code: exactly one wins', async () => {
+    const start = await service.startDeviceAuthorization({
+      app: confidentialApp, requestedScopes: ['documents:read'],
+      verificationBaseUrl: 'https://ship.example.com',
+    });
+    const device = await store.getDeviceByUserCode(start.user_code);
+    await store.approveDevice(device!.id, userId, workspaceId, ['documents:read']);
+    const before = await accessTokenCount(confidentialApp, 'device_code');
+
+    const results = await Promise.allSettled([
+      service.pollDeviceToken({ app: confidentialApp, deviceCode: start.device_code }),
+      service.pollDeviceToken({ app: confidentialApp, deviceCode: start.device_code }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+
+    const after = await accessTokenCount(confidentialApp, 'device_code');
+    expect(after - before).toBe(1);
   });
 });
 

@@ -3,6 +3,7 @@
  * server is platform glue (not under /api/v1), so it may use internal db/client.
  */
 import { pool } from '../../db/client.js';
+import type { PoolClient } from 'pg';
 
 export interface OAuthAppRow {
   id: string;
@@ -73,6 +74,66 @@ export interface DeviceCodeRow {
   interval_sec: number;
   last_polled_at: string | null;
   expires_at: string;
+}
+
+export interface AccessTokenMintInput {
+  tokenHash: string;
+  appId: string;
+  userId: string | null;
+  workspaceId: string | null;
+  scopes: string[];
+  grantType: string;
+  expiresAt: Date;
+}
+
+export interface RefreshTokenMintInput {
+  tokenHash: string;
+  appId: string;
+  userId: string;
+  workspaceId: string | null;
+  scopes: string[];
+  familyId: string;
+  expiresAt: Date;
+}
+
+async function insertAccessTokenInTx(client: PoolClient, input: AccessTokenMintInput): Promise<void> {
+  await client.query(
+    `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      input.tokenHash,
+      input.appId,
+      input.userId,
+      input.workspaceId,
+      input.scopes,
+      input.grantType,
+      input.expiresAt,
+    ],
+  );
+}
+
+async function insertRefreshTokenInTx(client: PoolClient, input: RefreshTokenMintInput): Promise<RefreshTokenRow> {
+  const refresh = await client.query(
+    `INSERT INTO oauth_refresh_tokens (token_hash, app_id, user_id, workspace_id, scopes, family_id, expires_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     RETURNING *`,
+    [
+      input.tokenHash,
+      input.appId,
+      input.userId,
+      input.workspaceId,
+      input.scopes,
+      input.familyId,
+      input.expiresAt,
+    ],
+  );
+  return refresh.rows[0] as RefreshTokenRow;
+}
+
+async function rollbackQuietly(client: PoolClient): Promise<void> {
+  await client.query('ROLLBACK').catch(() => {
+    /* ignore rollback failure */
+  });
 }
 
 // ---- apps -----------------------------------------------------------------
@@ -157,8 +218,38 @@ export async function getAuthCodeByHash(codeHash: string): Promise<AuthCodeRow |
   return (r.rows[0] as AuthCodeRow) ?? null;
 }
 
-export async function consumeAuthCode(id: string): Promise<void> {
-  await pool.query('UPDATE oauth_authorization_codes SET consumed_at = now() WHERE id = $1', [id]);
+export async function consumeAuthCodeAndMintTokens(input: {
+  authCodeId: string;
+  accessToken: AccessTokenMintInput;
+  refreshToken: RefreshTokenMintInput;
+}): Promise<RefreshTokenRow | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const claim = await client.query(
+      `UPDATE oauth_authorization_codes
+         SET consumed_at = now()
+       WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
+       RETURNING id`,
+      [input.authCodeId],
+    );
+    if ((claim.rowCount ?? 0) !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await insertAccessTokenInTx(client, input.accessToken);
+    const refresh = await insertRefreshTokenInTx(client, input.refreshToken);
+
+    await client.query('COMMIT');
+    return refresh;
+  } catch (err) {
+    await rollbackQuietly(client);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ---- access tokens --------------------------------------------------------
@@ -204,6 +295,12 @@ export async function touchAccessToken(id: string): Promise<void> {
 
 // ---- refresh tokens -------------------------------------------------------
 
+export interface RefreshRotationInput {
+  oldRefreshTokenId: string;
+  accessToken: AccessTokenMintInput;
+  refreshToken: RefreshTokenMintInput;
+}
+
 export async function insertRefreshToken(input: {
   tokenHash: string;
   appId: string;
@@ -226,11 +323,45 @@ export async function getRefreshTokenByHash(tokenHash: string): Promise<RefreshT
   return (r.rows[0] as RefreshTokenRow) ?? null;
 }
 
-export async function consumeRefreshToken(id: string, replacedBy: string): Promise<void> {
-  await pool.query(
-    'UPDATE oauth_refresh_tokens SET consumed_at = now(), replaced_by = $2 WHERE id = $1',
-    [id, replacedBy],
-  );
+/**
+ * Atomically rotate a refresh token and mint its replacement. The old-token claim
+ * holds a row lock until the access token, replacement refresh token, and
+ * `replaced_by` link are all committed. A concurrent duplicate refresh therefore
+ * cannot revoke the family before the replacement row exists.
+ */
+export async function rotateRefreshToken(input: RefreshRotationInput): Promise<RefreshTokenRow | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const claim = await client.query(
+      `UPDATE oauth_refresh_tokens
+         SET consumed_at = now()
+       WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+       RETURNING id`,
+      [input.oldRefreshTokenId],
+    );
+    if ((claim.rowCount ?? 0) !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await insertAccessTokenInTx(client, input.accessToken);
+    const row = await insertRefreshTokenInTx(client, input.refreshToken);
+
+    await client.query(
+      'UPDATE oauth_refresh_tokens SET replaced_by = $2 WHERE id = $1',
+      [input.oldRefreshTokenId, row.id],
+    );
+
+    await client.query('COMMIT');
+    return row;
+  } catch (err) {
+    await rollbackQuietly(client);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Theft response: revoke every refresh token in the family. */
@@ -284,7 +415,35 @@ export async function touchDevicePoll(id: string): Promise<void> {
   await pool.query('UPDATE oauth_device_codes SET last_polled_at = now() WHERE id = $1', [id]);
 }
 
-/** Single-use: remove the device code once tokens have been issued. */
-export async function deleteDeviceCode(id: string): Promise<void> {
-  await pool.query('DELETE FROM oauth_device_codes WHERE id = $1', [id]);
+export async function claimDeviceCodeAndMintTokens(input: {
+  deviceCodeId: string;
+  accessToken: AccessTokenMintInput;
+  refreshToken: RefreshTokenMintInput;
+}): Promise<RefreshTokenRow | null> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const claim = await client.query(
+      `DELETE FROM oauth_device_codes
+       WHERE id = $1 AND status = 'approved' AND expires_at > now()
+       RETURNING id`,
+      [input.deviceCodeId],
+    );
+    if ((claim.rowCount ?? 0) !== 1) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+
+    await insertAccessTokenInTx(client, input.accessToken);
+    const refresh = await insertRefreshTokenInTx(client, input.refreshToken);
+
+    await client.query('COMMIT');
+    return refresh;
+  } catch (err) {
+    await rollbackQuietly(client);
+    throw err;
+  } finally {
+    client.release();
+  }
 }

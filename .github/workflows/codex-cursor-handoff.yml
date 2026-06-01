@@ -13,12 +13,12 @@ jobs:
   notify-cursor:
     name: Notify Cursor when Codex requests changes
     runs-on: ubuntu-latest
+    # Detect Codex reviews by their body marker — the review is POSTED by
+    # github-actions[bot], not a 'codex'/'openai' user, so matching on the author
+    # login never fired (this handoff was a silent no-op before).
     if: >
       github.event.review.state == 'changes_requested' &&
-      (
-        contains(github.event.review.user.login, 'codex') ||
-        contains(github.event.review.user.login, 'openai')
-      )
+      contains(github.event.review.body, 'codex-action-review')
     steps:
       - name: Comment with Cursor handoff from connected GitHub user
         env:
@@ -30,6 +30,19 @@ jobs:
           if [ -z "${GH_TOKEN:-}" ]; then
             echo "CURSOR_TRIGGER_GITHUB_TOKEN is required so Cursor sees the trigger as a real connected user, not github-actions[bot]." >&2
             exit 1
+          fi
+
+          # Loop guard: bound how many times Cursor auto-fixes one PR. Once it has
+          # pushed >= MAX_ROUNDS commits, stop pinging and ask for a human, so a
+          # stubborn diff can't drive an unbounded auto-fix/re-review cycle.
+          MAX_ROUNDS=8
+          CURSOR_COMMITS=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --paginate \
+            --jq '[.[] | select((.author.login // "") | test("cursor"; "i"))] | length' 2>/dev/null || echo 0)
+
+          if [ "${CURSOR_COMMITS:-0}" -ge "$MAX_ROUNDS" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "⚠️ Cursor has already auto-fixed this PR ${CURSOR_COMMITS} times (cap: ${MAX_ROUNDS}). Stopping the auto-fix loop — a human should review the remaining Codex findings."
+            exit 0
           fi
 
           gh pr comment "$PR_NUMBER" \

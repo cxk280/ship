@@ -20,7 +20,7 @@ const stubDeps: PlatformDeps = {
 
 function app() {
   const a = express();
-  a.use(express.json());
+  // No global body parser — the v1 router owns its own parsing (as in app.ts).
   a.use('/api/v1', createV1Router(stubDeps));
   return a;
 }
@@ -44,5 +44,18 @@ describe('/api/v1 edge', () => {
     const res = await request(app()).get('/api/v1/nope').set('X-Request-Id', 'trace-abc');
     expect(res.headers['x-request-id']).toBe('trace-abc');
     expect(res.body.request_id).toBe('trace-abc');
+  });
+
+  it('a malformed JSON body still ships the ApiError shape (not Express HTML)', async () => {
+    // The body parser lives INSIDE the v1 router (after request-id), so a parse
+    // failure is caught by the v1 error handler — the contract holds for bad bodies.
+    const res = await request(app())
+      .post('/api/v1/documents')
+      .set('Content-Type', 'application/json')
+      .set('X-Request-Id', 'trace-bad-body')
+      .send('{ this is not valid json ');
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('validation_failed');
+    expect(res.body.request_id).toBe('trace-bad-body');
   });
 });

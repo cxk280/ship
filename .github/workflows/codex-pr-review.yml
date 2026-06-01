@@ -36,6 +36,11 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           sandbox: read-only
+          # Allow the Cursor fix bot's pushes to be reviewed. Without this, the
+          # action's check-write-access rejects 'cursor[bot]' (permission: none)
+          # and the run CRASHES before posting a verdict — pinning the PR at the
+          # last REQUEST_CHANGES forever (the auto-review loop never converges).
+          allow-bot-users: "cursor[bot]"
           output-schema: |
             {
               "type": "object",
@@ -114,16 +119,22 @@ jobs:
             try {
               result = JSON.parse(jsonText);
             } catch (error) {
-              result = {
-                decision: 'REQUEST_CHANGES',
-                summary: `Codex returned output that could not be parsed as review JSON: ${error.message}`,
-                findings: [{
-                  severity: 'blocking',
-                  file: 'Codex PR Review',
-                  line: 1,
-                  message: raw.slice(0, 4000) || 'No Codex output was returned.',
-                }],
-              };
+              // FAIL OPEN: a parse/transport error in the reviewer itself must not
+              // auto-block the PR (and must not trigger the Cursor fix loop). Post a
+              // non-blocking COMMENT and exit — humans still review.
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: [
+                  '<!-- codex-action-review -->',
+                  '⚠️ Codex review could not be parsed (transient reviewer error); not blocking.',
+                  '',
+                  `Parse error: ${error.message}`,
+                ].join('\n'),
+              });
+              core.setOutput('event', 'COMMENT');
+              return;
             }
 
             const blockingFindings = Array.isArray(result.findings)
@@ -163,19 +174,5 @@ jobs:
 
             core.setOutput('event', event);
 
-      - name: Notify Cursor from connected GitHub user
-        if: steps.submit_review.outputs.event == 'REQUEST_CHANGES'
-        env:
-          GH_TOKEN: ${{ secrets.CURSOR_TRIGGER_GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "CURSOR_TRIGGER_GITHUB_TOKEN is required so Cursor sees the trigger as a real connected user, not github-actions[bot]." >&2
-            exit 1
-          fi
-
-          gh pr comment "$PR_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "@cursor fix the Codex review comments"
+      # NOTE: the "@cursor fix" ping lives ONLY in codex-cursor-handoff.yml (which
+      # reacts to the submitted review). Pinging here too double-triggered Cursor.
