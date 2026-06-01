@@ -154,6 +154,16 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
     origin: corsOrigin,
     credentials: true,
   }));
+
+  // ----------------------------------------------------------------------------
+  // PUBLIC PLATFORM EDGE — `/api/v1`
+  // A fresh router with its OWN pipeline (request-id → body parsers → bearer auth
+  // → scope → rate-limit → audit → handler). It is mounted before the internal
+  // body-parser/session/CSRF stack so parser failures keep the public ApiError
+  // contract instead of falling through to Express's default error response.
+  // ----------------------------------------------------------------------------
+  app.use('/api/v1', buildPlatform().v1Router);
+
   app.use(express.json({ limit: '10mb' }));  // Large wiki documents can be several MB
   app.use(express.urlencoded({ extended: true, limit: '10mb' })); // For HTML form submissions
   app.use(cookieParser(sessionSecret));
@@ -183,14 +193,6 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
 
   // API documentation (no auth needed)
   setupSwagger(app);
-
-  // ----------------------------------------------------------------------------
-  // PUBLIC PLATFORM EDGE — `/api/v1`
-  // A fresh router with its OWN pipeline (request-id → bearer auth → scope →
-  // rate-limit → audit → handler). It shares no request-handling middleware with
-  // the internal `/api/*` routes below. Wired in the composition root.
-  // ----------------------------------------------------------------------------
-  app.use('/api/v1', buildPlatform().v1Router);
 
   // Setup routes (CSRF protected - first-time setup only)
   app.use('/api/setup', conditionalCsrf, setupRoutes);

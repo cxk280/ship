@@ -3,15 +3,15 @@
  *
  * This is a BRAND-NEW router that shares NO request-handling middleware with the
  * internal `/api/*` API (no session auth, no conditional CSRF, no internal rate
- * limiter). Its pipeline is: request-id → bearer auth → [resource routes, each
- * declaring a scope] → 404 → public error handler.
+ * limiter). Its pipeline is: request-id → body parsers → bearer auth →
+ * [resource routes, each declaring a scope] → 404 → public error handler.
  *
  * Boundary rule (enforced by scripts/check-api-boundary.mjs): files under
  * platform/api/v1/** must NOT import from api/src outside platform/. Concrete
  * collaborators (domain services, bearer auth) arrive via injected `deps`, wired
  * in the composition root (platform/composition.ts → app.ts).
  */
-import { Router, type RequestHandler } from 'express';
+import express, { Router, type RequestHandler } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
 
 /**
@@ -34,6 +34,11 @@ export function createV1Router(_deps: PlatformDeps = {}): Router {
   // Every public request gets a request id (echoed as X-Request-Id, used by the
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
+
+  // Public body parsing belongs inside this router so parse failures still flow
+  // through the ApiError contract instead of Express's default error response.
+  router.use(express.json({ limit: '10mb' }));
+  router.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
   // Resource routers are mounted here in later slices, e.g.:
   //   router.use('/me', createMeRouter(deps));

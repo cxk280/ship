@@ -88,6 +88,54 @@ export class ApiError extends Error {
   }
 }
 
+interface BodyParserError {
+  type?: unknown;
+  status?: unknown;
+  statusCode?: unknown;
+}
+
+const BODY_PARSER_ERROR_PREFIXES = [
+  'charset.',
+  'encoding.',
+  'entity.',
+  'parameters.',
+  'request.',
+] as const;
+
+function isBodyParserClientError(err: unknown): err is BodyParserError {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+
+  const maybe = err as BodyParserError;
+  const status = typeof maybe.status === 'number'
+    ? maybe.status
+    : typeof maybe.statusCode === 'number'
+      ? maybe.statusCode
+      : undefined;
+  const type = typeof maybe.type === 'string' ? maybe.type : undefined;
+
+  return Boolean(
+    status !== undefined
+      && status >= 400
+      && status < 500
+      && type
+      && BODY_PARSER_ERROR_PREFIXES.some((prefix) => type.startsWith(prefix)),
+  );
+}
+
+function apiErrorFromBodyParser(err: BodyParserError): ApiError {
+  switch (err.type) {
+    case 'entity.parse.failed':
+      return ApiError.validation('Malformed request body');
+    case 'entity.too.large':
+    case 'parameters.too.many':
+      return ApiError.validation('Request body too large');
+    default:
+      return ApiError.validation('Invalid request body');
+  }
+}
+
 /**
  * Per-request id middleware for the public edge.
  *
@@ -127,6 +175,10 @@ export function apiErrorHandler(
   _next: NextFunction,
 ): void {
   const requestId = req.requestId ?? randomUUID();
+  if (!req.requestId) {
+    req.requestId = requestId;
+    res.setHeader('X-Request-Id', requestId);
+  }
 
   if (err instanceof ApiError) {
     res.status(err.status).json(err.toBody(requestId));
@@ -137,6 +189,12 @@ export function apiErrorHandler(
     const apiErr = ApiError.validation('Request validation failed', {
       issues: err.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
     });
+    res.status(apiErr.status).json(apiErr.toBody(requestId));
+    return;
+  }
+
+  if (isBodyParserClientError(err)) {
+    const apiErr = apiErrorFromBodyParser(err);
     res.status(apiErr.status).json(apiErr.toBody(requestId));
     return;
   }
