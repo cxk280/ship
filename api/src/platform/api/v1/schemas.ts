@@ -104,6 +104,12 @@ export const DeliverySchema = z
   })
   .openapi('WebhookDelivery');
 
+/** The 201 body — includes the one-time signing_secret a client must capture. */
+export const CreatedSubscriptionSchema = SubscriptionSchema.extend({
+  signing_secret: z.string().openapi({ description: 'Shown once. Save it to verify deliveries.' }),
+  warning: z.string(),
+}).openapi('CreatedWebhookSubscription');
+
 export const SubscriptionIdParamSchema = z.object({ id: z.string().uuid() });
 export const DeliveryIdParamSchema = z.object({ id: z.string().uuid() });
 

@@ -19,6 +19,7 @@ import {
   MeResponseSchema,
   CreateSubscriptionSchema,
   SubscriptionSchema,
+  CreatedSubscriptionSchema,
   DeliverySchema,
   SubscriptionIdParamSchema,
   DeliveryIdParamSchema,
@@ -40,6 +41,7 @@ registry.register('CreateDocument', CreateDocumentSchema);
 registry.register('MeResponse', MeResponseSchema);
 registry.register('CreateSubscription', CreateSubscriptionSchema);
 registry.register('WebhookSubscription', SubscriptionSchema);
+registry.register('CreatedWebhookSubscription', CreatedSubscriptionSchema);
 registry.register('WebhookDelivery', DeliverySchema);
 
 /** Shared error responses, each shaped as ApiError. */
@@ -120,7 +122,7 @@ registry.registerPath({
   method: 'post', path: '/webhooks', summary: 'Create a webhook subscription', tags: ['webhooks'], security: bearer,
   request: { body: { content: { 'application/json': { schema: CreateSubscriptionSchema } } } },
   responses: {
-    201: { description: 'Subscription created; signing_secret shown once', content: { 'application/json': { schema: SubscriptionSchema } } },
+    201: { description: 'Subscription created; signing_secret shown once', content: { 'application/json': { schema: CreatedSubscriptionSchema } } },
     ...errorResponses(400, 401, 403),
   },
 });

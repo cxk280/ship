@@ -10,11 +10,15 @@
  * timeout / 408 / 429 are transient (retry); other 4xx are permanent (→ DLQ).
  * After 6 failed attempts the delivery is dead-lettered (status='dead').
  */
+import http from 'node:http';
+import https from 'node:https';
+import dns from 'node:dns';
+import type { LookupFunction } from 'node:net';
 import { signPayload } from './signer.js';
 import type { Clock } from './clock.js';
 import type { WebhookEnvelope } from './events.js';
 import { updateDeliveryAttempt } from './store.js';
-import { assertPublicHttpUrl, allowPrivateTargets } from './url-guard.js';
+import { assertPublicHttpUrl, allowPrivateTargets, isPrivateIp } from './url-guard.js';
 
 export const RETRY_DELAYS_MS = [1000, 4000, 16000, 60_000, 300_000, 1_800_000];
 export const MAX_ATTEMPTS = 6;
@@ -45,32 +49,77 @@ function isTransient(status: number): boolean {
   return status === 408 || status === 429; // request timeout / too many requests
 }
 
-/** Real HTTP transport: POST with a hard timeout; non-2xx surfaces its status. */
+/**
+ * Real HTTP transport: POST with a hard timeout. To prevent DNS-rebinding SSRF,
+ * production resolves the host ONCE, vets the address, then PINS the connection
+ * to that exact IP (via a custom lookup) — the HTTP client never re-resolves, so
+ * a domain can't return a public IP during validation and a private IP at connect
+ * time. SNI/Host are preserved as the original hostname. Dev/test skips pinning so
+ * localhost listeners (the TTFE drill) work.
+ */
 export function fetchTransport(timeoutMs = 5000): Transport {
-  return async (url, opts) => {
-    // Defense-in-depth against DNS rebinding: re-validate the target at send time.
-    // A blocked target is a permanent 4xx (→ DLQ), not an endless retry.
+  return async (rawUrl, opts) => {
+    let url: URL;
     try {
-      await assertPublicHttpUrl(url, { allowPrivate: allowPrivateTargets() });
+      url = new URL(rawUrl);
+    } catch {
+      return { status: 400, bodyExcerpt: 'invalid target url' };
+    }
+    const allowPrivate = allowPrivateTargets();
+    try {
+      await assertPublicHttpUrl(rawUrl, { allowPrivate });
     } catch (e) {
       return { status: 403, bodyExcerpt: e instanceof Error ? e.message : 'target blocked' };
     }
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { method: 'POST', headers: opts.headers, body: opts.body, signal: controller.signal });
-      let excerpt = '';
+
+    // Resolve once + vet, then pin (production only).
+    let pinnedIp: string | undefined;
+    let pinnedFamily = 4;
+    // Only hostnames need pinning; IP literals were already vetted above.
+    if (!allowPrivate && !/^[\d.]+$/.test(url.hostname) && !url.hostname.includes(':')) {
       try {
-        excerpt = (await res.text()).slice(0, 500);
+        const addrs = await dns.promises.lookup(url.hostname, { all: true });
+        const ok = addrs.find((a) => !isPrivateIp(a.address));
+        if (!ok) return { status: 403, bodyExcerpt: 'no public address for target' };
+        pinnedIp = ok.address;
+        pinnedFamily = ok.family;
       } catch {
-        /* ignore */
+        return { status: 403, bodyExcerpt: 'could not resolve target host' };
       }
-      return { status: res.status, bodyExcerpt: excerpt };
-    } catch (e) {
-      return { status: 0, bodyExcerpt: e instanceof Error ? e.message.slice(0, 500) : 'network error' };
-    } finally {
-      clearTimeout(t);
     }
+
+    const lib = url.protocol === 'https:' ? https : http;
+    const pinnedLookup: LookupFunction | undefined = pinnedIp
+      ? (((_host: string, _options: unknown, cb: (err: Error | null, addr: string, fam: number) => void) =>
+          cb(null, pinnedIp as string, pinnedFamily)) as unknown as LookupFunction)
+      : undefined;
+
+    return await new Promise<TransportResult>((resolve) => {
+      const req = lib.request(
+        url,
+        {
+          method: 'POST',
+          headers: { ...opts.headers, Host: url.host },
+          timeout: timeoutMs,
+          ...(pinnedLookup ? { lookup: pinnedLookup } : {}),
+          ...(url.protocol === 'https:' ? { servername: url.hostname } : {}),
+        },
+        (res) => {
+          let body = '';
+          res.on('data', (c: Buffer) => {
+            if (body.length < 500) body += c.toString('utf8');
+          });
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, bodyExcerpt: body.slice(0, 500) }));
+        },
+      );
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ status: 0, bodyExcerpt: 'timeout' });
+      });
+      req.on('error', (e: Error) => resolve({ status: 0, bodyExcerpt: e.message.slice(0, 500) }));
+      req.write(opts.body);
+      req.end();
+    });
   };
 }
 

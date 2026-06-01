@@ -258,6 +258,29 @@
           "created_at"
         ]
       },
+      "CreatedWebhookSubscription": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookSubscription"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "signing_secret": {
+                "type": "string",
+                "description": "Shown once. Save it to verify deliveries."
+              },
+              "warning": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "signing_secret",
+              "warning"
+            ]
+          }
+        ]
+      },
       "WebhookDelivery": {
         "type": "object",
         "properties": {
@@ -599,7 +622,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WebhookSubscription"
+                  "$ref": "#/components/schemas/CreatedWebhookSubscription"
                 }
               }
             }
