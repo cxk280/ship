@@ -134,6 +134,20 @@ describe('refresh_token rotation + theft detection', () => {
     expect(next.refresh_token).not.toBe(rt);
   });
 
+  it('two CONCURRENT refreshes with the same token: exactly one wins (atomic rotation)', async () => {
+    const rt = await freshRefresh();
+    const results = await Promise.allSettled([
+      service.refresh({ app: confidentialApp, refreshToken: rt }),
+      service.refresh({ app: confidentialApp, refreshToken: rt }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    // Exactly one mint succeeds; the racing duplicate is treated as reuse.
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ error: 'invalid_grant' });
+  });
+
   it('reusing a CONSUMED refresh token revokes the whole family', async () => {
     const rt1 = await freshRefresh();
     const next = await service.refresh({ app: confidentialApp, refreshToken: rt1 });

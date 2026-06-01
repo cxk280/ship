@@ -233,6 +233,28 @@ export async function consumeRefreshToken(id: string, replacedBy: string): Promi
   );
 }
 
+/**
+ * Atomically claim a refresh token for rotation: marks it consumed ONLY if it is
+ * still unconsumed and unrevoked, returning true iff THIS call won the claim.
+ * Two concurrent refreshes with the same token serialize on the row lock, so
+ * exactly one wins — closing the read-check-then-consume race (one-time-use holds).
+ */
+export async function claimRefreshToken(id: string): Promise<boolean> {
+  const r = await pool.query(
+    `UPDATE oauth_refresh_tokens
+       SET consumed_at = now()
+     WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+     RETURNING id`,
+    [id],
+  );
+  return (r.rowCount ?? 0) === 1;
+}
+
+/** Best-effort bookkeeping: link a consumed token to its replacement. */
+export async function setRefreshReplacedBy(id: string, replacedBy: string): Promise<void> {
+  await pool.query('UPDATE oauth_refresh_tokens SET replaced_by = $2 WHERE id = $1', [id, replacedBy]);
+}
+
 /** Theft response: revoke every refresh token in the family. */
 export async function revokeRefreshFamily(familyId: string): Promise<void> {
   await pool.query(

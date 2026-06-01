@@ -191,8 +191,8 @@ export async function refresh(input: {
   if (row.app_id !== input.app.id) throw new OAuthError('invalid_grant', 'Refresh token belongs to a different client');
   if (row.revoked_at) throw new OAuthError('invalid_grant', 'Refresh token has been revoked');
 
-  // THEFT DETECTION: a consumed (already-rotated) token presented again means the
-  // token was captured. Revoke the entire family and reject. (The marquee drill.)
+  // THEFT DETECTION (fast path): a consumed (already-rotated) token presented
+  // again means the token was captured. Revoke the entire family and reject.
   if (row.consumed_at) {
     await store.revokeRefreshFamily(row.family_id);
     throw new OAuthError('invalid_grant', 'Refresh token reuse detected — token family revoked');
@@ -208,7 +208,17 @@ export async function refresh(input: {
     scopes = input.requestedScopes;
   }
 
-  // Mint the new pair in the SAME family, then mark the old one consumed.
+  // ATOMICALLY claim the token before minting. Two concurrent refreshes with the
+  // same token serialize on the row lock; exactly one wins. The loser (which is
+  // indistinguishable from token reuse) triggers the theft response. This closes
+  // the read-check-then-consume race that would otherwise let both mint.
+  const won = await store.claimRefreshToken(row.id);
+  if (!won) {
+    await store.revokeRefreshFamily(row.family_id);
+    throw new OAuthError('invalid_grant', 'Refresh token reuse detected — token family revoked');
+  }
+
+  // Mint the new pair in the SAME family, then link the rotation (bookkeeping).
   const next = await mintTokens({
     app: input.app,
     userId: row.user_id,
@@ -218,11 +228,8 @@ export async function refresh(input: {
     withRefresh: true,
     familyId: row.family_id,
   });
-
-  // Find the freshly-minted refresh token id to record the rotation link.
-  const newHash = sha256(next.refresh_token!);
-  const newRow = await store.getRefreshTokenByHash(newHash);
-  await store.consumeRefreshToken(row.id, newRow!.id);
+  const newRow = await store.getRefreshTokenByHash(sha256(next.refresh_token!));
+  await store.setRefreshReplacedBy(row.id, newRow!.id);
   return next;
 }
 
