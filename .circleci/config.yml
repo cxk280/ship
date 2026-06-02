@@ -90,6 +90,50 @@ jobs:
           name: Layers 3+4 — LLM-graded + adversarial evals (LangSmith)
           command: pnpm --filter @ship/api fleetgraph:eval:llm
 
+  ttfe_drill:
+    # Signature challenge: on every PR, run the full Time-to-First-Event loop
+    # end-to-end against a real Ship instance — device login → subscribe →
+    # create document → receive a SIGNED webhook → verify the signature — and
+    # fail the build if it regresses past the drill's internal threshold (<60s).
+    docker:
+      - image: cimg/node:20.18
+        environment:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres@localhost:5432/ship_test
+          PORT: "3000"
+          SHIP_BASE_URL: http://localhost:3000
+          SHIP_CLIENT_ID: ship_app_cli
+          FLEETGRAPH_DISABLE_LLM: "1"
+          LANGCHAIN_TRACING_V2: "false"
+      - image: cimg/postgres:16.4
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: ship_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+    steps:
+      - setup_node
+      - run:
+          name: Wait for Postgres
+          command: for i in $(seq 1 30); do (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1 && exit 0; sleep 1; done; echo "postgres not ready"; exit 1
+      - run:
+          name: Migrate (creates platform schema + seeds ship_app_cli) and seed the drill user
+          command: |
+            pnpm --filter @ship/api db:migrate
+            pnpm --filter @ship/api db:seed
+      - run:
+          name: Build the API (the drill runs against the built server)
+          command: pnpm --filter @ship/api build
+      - run:
+          name: Start Ship API
+          command: node api/dist/index.js
+          background: true
+      - run:
+          name: Wait for API health
+          command: for i in $(seq 1 60); do curl -sf http://localhost:3000/health >/dev/null 2>&1 && exit 0; sleep 1; done; echo "API not ready"; cat /tmp/api.log 2>/dev/null; exit 1
+      - run:
+          name: Time-to-First-Event drill (login → create document → verified signed webhook)
+          command: pnpm drill:ttfe
+
   deploy_railway:
     parameters:
       railway_environment:
@@ -123,11 +167,13 @@ workflows:
           requires: [install_build]
       - eval_llm:
           requires: [install_build]
+      - ttfe_drill:
+          requires: [install_build]
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
           railway_token_env: RAILWAY_TOKEN_DEV
-          requires: [install_build, eval_deterministic, test_integration, eval_llm]
+          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill]
           filters:
             branches:
               only: master

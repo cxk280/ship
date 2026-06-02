@@ -23,6 +23,17 @@ export {
 } from './token-store.js';
 export { runDeviceLogin, type DeviceLoginOptions, type DeviceLoginResult } from './auth/device.js';
 export {
+  beginAuthorizationCode,
+  completeAuthorizationCode,
+  runAuthorizationCodeFlow,
+  type BeginAuthorizationCodeOptions,
+  type AuthorizationRequest,
+  type CompleteAuthorizationCodeOptions,
+  type AuthorizationCodeResult,
+  type AuthorizationCodeFlowOptions,
+} from './auth/authcode.js';
+export { generatePkce, randomState, type Pkce } from './auth/pkce.js';
+export {
   verifyWebhook,
   computeSignature,
   parseSignatureHeader,
