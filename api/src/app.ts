@@ -42,6 +42,7 @@ import { initializeCAIA } from './services/caia.js';
 import { buildPlatform } from './platform/composition.js';
 import { createOAuthRouter } from './platform/oauth/routes.js';
 import { createAppsRouter } from './platform/apps/routes.js';
+import { createPortalRouter } from './platform/apps/portal-routes.js';
 
 // Validate SESSION_SECRET in production
 if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
@@ -202,6 +203,7 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   app.use('/api/v1', buildPlatform().v1Router);
   app.use('/oauth', createOAuthRouter());
   app.use('/api/oauth/apps', conditionalCsrf, createAppsRouter());
+  app.use('/api/oauth/portal', conditionalCsrf, createPortalRouter());
 
   // Setup routes (CSRF protected - first-time setup only)
   app.use('/api/setup', conditionalCsrf, setupRoutes);
