@@ -22,6 +22,11 @@ export interface ShipClientOptions {
   /** Enables refresh-on-401. */
   clientId?: string;
   clientSecret?: string;
+  /**
+   * Maximum retry attempts on transient errors (429, 5xx, network failures).
+   * Default: 3. Set to 0 to disable retries.
+   */
+  maxRetries?: number;
 }
 
 export class ShipClient {
@@ -34,7 +39,7 @@ export class ShipClient {
   constructor(opts: ShipClientOptions = {}) {
     const origin = (opts.baseUrl ?? 'http://localhost:3000').replace(/\/$/, '');
     const tokenStore = opts.tokenStore ?? new InMemoryTokenStore(opts.token ? { access_token: opts.token } : undefined);
-    this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret });
+    this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret, maxRetries: opts.maxRetries });
     this.documents = new DocumentsClient(this.http);
     this.issues = new IssuesClient(this.http);
     this.sprints = new SprintsClient(this.http);
