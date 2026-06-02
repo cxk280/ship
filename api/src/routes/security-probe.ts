@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware, superAdminMiddleware } from '../middleware/auth.js';
 import { runSecurityProbe } from '../services/securityProbe.js';
 
-const router = Router();
+type RouterType = ReturnType<typeof Router>;
+const router: RouterType = Router();
 
 // All security-probe routes require an authenticated super-admin.
 router.use(authMiddleware, superAdminMiddleware);

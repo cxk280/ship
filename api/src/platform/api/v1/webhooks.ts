@@ -17,6 +17,12 @@ function requireApp(req: Request): string {
   return appId;
 }
 
+/** The token's workspace (null for client-credentials). Used to isolate the
+ *  shared CLI app's subscriptions across workspaces. */
+function ws(req: Request): string | null {
+  return req.platformAuth?.workspaceId ?? null;
+}
+
 publicRoutes.register({ method: 'post', path: '/webhooks', scope: SCOPES.WEBHOOKS_MANAGE, paginated: false, summary: 'Create a webhook subscription' });
 publicRoutes.register({ method: 'get', path: '/webhooks', scope: SCOPES.WEBHOOKS_MANAGE, paginated: false, summary: 'List webhook subscriptions' });
 publicRoutes.register({ method: 'delete', path: '/webhooks/{id}', scope: SCOPES.WEBHOOKS_MANAGE, paginated: false, summary: 'Delete a webhook subscription' });
@@ -45,6 +51,7 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
       }
       const { subscription, signing_secret } = await deps.webhooks.createSubscription({
         appId: requireApp(req),
+        workspaceId: req.platformAuth?.workspaceId ?? null,
         eventType: body.event_type,
         targetUrl: body.target_url,
       });
@@ -58,10 +65,10 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
     }
   });
 
-  // GET /webhooks — list (no secrets).
+  // GET /webhooks — list (no secrets). Scoped to the token's app AND workspace.
   router.get('/', scope, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.json({ data: await deps.webhooks.listSubscriptions(requireApp(req)) });
+      res.json({ data: await deps.webhooks.listSubscriptions({ appId: requireApp(req), workspaceId: ws(req) }) });
     } catch (err) {
       next(err);
     }
@@ -70,7 +77,7 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
   // GET /webhooks/deliveries — the delivery log (mounted before /:id so it isn't shadowed).
   router.get('/deliveries', scope, async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.json({ data: await deps.webhooks.listDeliveries(requireApp(req)) });
+      res.json({ data: await deps.webhooks.listDeliveries({ appId: requireApp(req), workspaceId: ws(req) }) });
     } catch (err) {
       next(err);
     }
@@ -80,7 +87,7 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
   router.post('/deliveries/:id/replay', scope, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = DeliveryIdParamSchema.parse(req.params);
-      const ok = await deps.webhooks.replay({ appId: requireApp(req), deliveryId: id });
+      const ok = await deps.webhooks.replay({ appId: requireApp(req), workspaceId: ws(req), deliveryId: id });
       if (!ok) throw ApiError.notFound('Delivery not found');
       res.status(202).json({ status: 'replaying', delivery_id: id });
     } catch (err) {
@@ -92,7 +99,7 @@ export function createWebhooksRouter(deps: PlatformDeps): Router {
   router.delete('/:id', scope, async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { id } = SubscriptionIdParamSchema.parse(req.params);
-      const ok = await deps.webhooks.deactivateSubscription({ appId: requireApp(req), id });
+      const ok = await deps.webhooks.deactivateSubscription({ appId: requireApp(req), workspaceId: ws(req), id });
       if (!ok) throw ApiError.notFound('Subscription not found');
       res.json({ status: 'deleted' });
     } catch (err) {

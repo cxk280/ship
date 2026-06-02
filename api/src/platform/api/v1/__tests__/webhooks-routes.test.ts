@@ -46,6 +46,17 @@ async function mintToken(scopes: string[]): Promise<string> {
 
 const tick = () => new Promise((r) => setTimeout(r, 60));
 
+/** Mint a token for a SHARED app (workspace_id NULL) but a specific workspace. */
+async function mintSharedAppToken(sharedAppId: string, wsId: string): Promise<string> {
+  const u = await pool.query(`INSERT INTO users (email, name) VALUES ($1,'X') RETURNING id`, [`u-${wsId}@example.com`]);
+  const raw = generate.accessToken();
+  await ostore.insertAccessToken({
+    tokenHash: sha256(raw), appId: sharedAppId, userId: u.rows[0].id, workspaceId: wsId,
+    scopes: ['webhooks:manage'], grantType: 'device_code', expiresAt: new Date(Date.now() + 3600_000),
+  });
+  return raw;
+}
+
 beforeAll(async () => {
   const ws = await pool.query(`INSERT INTO workspaces (name) VALUES ('WH routes WS') RETURNING id`);
   workspaceId = ws.rows[0].id;
@@ -118,6 +129,32 @@ describe('end-to-end: subscribe → create document → signed delivery → repl
     const replay = await request(app).post(`/api/v1/webhooks/deliveries/${delivered.id}/replay`)
       .set('Authorization', `Bearer ${token}`).send({});
     expect(replay.status).toBe(202);
+  });
+
+  it('isolates subscriptions across workspaces for a SHARED app (e.g. the CLI)', async () => {
+    // One app (workspace_id NULL) used by two workspaces — like ship_app_cli.
+    const shared = await ostore.createApp({
+      clientId: `ship_app_shared_${Date.now()}`, clientSecretHash: await hashClientSecret('x'),
+      name: 'Shared', redirectUris: [], requestedScopes: ['webhooks:manage'], appType: 'public',
+      ownerUserId: null, workspaceId: null,
+    });
+    const wsA = (await pool.query(`INSERT INTO workspaces (name) VALUES ('iso A') RETURNING id`)).rows[0].id;
+    const wsB = (await pool.query(`INSERT INTO workspaces (name) VALUES ('iso B') RETURNING id`)).rows[0].id;
+    const tokenA = await mintSharedAppToken(shared.id, wsA);
+    const tokenB = await mintSharedAppToken(shared.id, wsB);
+
+    const subA = await request(v1App()).post('/api/v1/webhooks').set('Authorization', `Bearer ${tokenA}`)
+      .send({ event_type: 'document.created', target_url: 'https://a.example.com/hook' }).expect(201);
+
+    // Workspace B (same app id!) must NOT see workspace A's subscription.
+    const listB = await request(v1App()).get('/api/v1/webhooks').set('Authorization', `Bearer ${tokenB}`);
+    expect(listB.body.data.some((s: { id: string }) => s.id === subA.body.id)).toBe(false);
+    // ...and can't delete it.
+    const delB = await request(v1App()).delete(`/api/v1/webhooks/${subA.body.id}`).set('Authorization', `Bearer ${tokenB}`);
+    expect(delB.status).toBe(404);
+    // Workspace A still sees its own.
+    const listA = await request(v1App()).get('/api/v1/webhooks').set('Authorization', `Bearer ${tokenA}`);
+    expect(listA.body.data.some((s: { id: string }) => s.id === subA.body.id)).toBe(true);
   });
 
   it('refuses to replay a delivery whose subscription was deleted', async () => {

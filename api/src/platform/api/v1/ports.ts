@@ -82,14 +82,14 @@ export interface PublicDelivery {
 export interface WebhooksPort {
   /** Allowed event types (for validation + the consent/portal UI). */
   eventTypes(): string[];
-  createSubscription(input: { appId: string; eventType: string; targetUrl: string }): Promise<{
+  createSubscription(input: { appId: string; workspaceId: string | null; eventType: string; targetUrl: string }): Promise<{
     subscription: PublicSubscription;
     signing_secret: string;
   }>;
-  listSubscriptions(appId: string): Promise<PublicSubscription[]>;
-  /** Returns false if the subscription isn't owned by the app. */
-  deactivateSubscription(input: { appId: string; id: string }): Promise<boolean>;
-  listDeliveries(appId: string): Promise<PublicDelivery[]>;
-  /** Returns false if the delivery isn't owned by the app. */
-  replay(input: { appId: string; deliveryId: string }): Promise<boolean>;
+  listSubscriptions(input: { appId: string; workspaceId: string | null }): Promise<PublicSubscription[]>;
+  /** Returns false if the subscription isn't owned by the app+workspace. */
+  deactivateSubscription(input: { appId: string; workspaceId: string | null; id: string }): Promise<boolean>;
+  listDeliveries(input: { appId: string; workspaceId: string | null }): Promise<PublicDelivery[]>;
+  /** Returns false if the delivery isn't owned by the app+workspace. */
+  replay(input: { appId: string; workspaceId: string | null; deliveryId: string }): Promise<boolean>;
 }

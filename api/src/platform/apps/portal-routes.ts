@@ -45,7 +45,7 @@ export function createPortalRouter(): RouterT {
     const app = await resolveOwnedApp(req, res, String(req.params.appId));
     if (!app) return;
 
-    const subs = await listSubscriptions(app.id);
+    const subs = await listSubscriptions(app.id, app.workspace_id);
     res.json({ success: true, data: subs });
   });
 
@@ -55,7 +55,7 @@ export function createPortalRouter(): RouterT {
     if (!app) return;
 
     const limit = Math.min(Number(req.query.limit) || 50, 200);
-    const deliveries = await listDeliveries(app.id, limit);
+    const deliveries = await listDeliveries(app.id, app.workspace_id, limit);
     res.json({ success: true, data: deliveries });
   });
 

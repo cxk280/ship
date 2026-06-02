@@ -1,0 +1,28 @@
+{
+  "name": "@ship/cli",
+  "version": "0.1.0",
+  "description": "Ship CLI — the must-ship reference integration (device flow, docs, webhooks tail).",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "ship": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "drill": "tsx src/drill.ts",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@ship/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.16"
+  }
+}

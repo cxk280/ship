@@ -27,7 +27,7 @@ async function setup(): Promise<{ workspaceId: string; appId: string; sub: wstor
     ownerUserId: u.rows[0].id, workspaceId,
   });
   const sub = await wstore.createSubscription({
-    appId: app.id, eventType: 'document.created', targetUrl: 'https://sub.example.com/hook',
+    appId: app.id, workspaceId, eventType: 'document.created', targetUrl: 'https://sub.example.com/hook',
     signingSecret: 'whsec_test_secret',
   });
   return { workspaceId, appId: app.id, sub };
@@ -75,7 +75,7 @@ describe('signed delivery (happy path)', () => {
     expect(v1).toBe(expected);
     expect(call.headers['Idempotency-Key']).toBeTruthy();
 
-    const deliveries = await wstore.listDeliveries(appId);
+    const deliveries = await wstore.listDeliveries(appId, workspaceId);
     expect(deliveries[0]!.status).toBe('delivered');
     expect(deliveries[0]!.attempt_number).toBe(1);
   });
@@ -98,7 +98,7 @@ describe('retry then success (scenario 6)', () => {
     await clock.advance(16000); // wait 16s → attempt 4 (200)
     expect(transport.calls).toHaveLength(4);
 
-    const d = (await wstore.listDeliveries(appId)).find((x) => x.attempt_number === 4 && x.status === 'delivered');
+    const d = (await wstore.listDeliveries(appId, workspaceId)).find((x) => x.attempt_number === 4 && x.status === 'delivered');
     expect(d, 'fourth attempt should record success').toBeTruthy();
   });
 });
@@ -116,7 +116,7 @@ describe('DLQ + replay (scenario 7)', () => {
     for (const wait of [0, 1000, 4000, 16000, 60_000, 300_000]) await clock.advance(wait);
     expect(transport.calls).toHaveLength(6);
 
-    const dead = (await wstore.listDeliveries(appId)).find((d) => d.subscription_id === sub.id && d.status === 'dead');
+    const dead = (await wstore.listDeliveries(appId, workspaceId)).find((d) => d.subscription_id === sub.id && d.status === 'dead');
     expect(dead, 'should be dead-lettered after 6 failures').toBeTruthy();
 
     // Replay against a now-healthy subscriber, carrying the ORIGINAL idempotency key.
@@ -155,7 +155,7 @@ describe('DLQ + replay (scenario 7)', () => {
     await bus.publish(eventFor(workspaceId));
     await clock.advance(0);
     expect(transport.calls).toHaveLength(1); // no retry
-    const dead = (await wstore.listDeliveries(appId)).find((d) => d.attempt_number === 1 && d.status === 'dead');
+    const dead = (await wstore.listDeliveries(appId, workspaceId)).find((d) => d.attempt_number === 1 && d.status === 'dead');
     expect(dead).toBeTruthy();
   });
 });
