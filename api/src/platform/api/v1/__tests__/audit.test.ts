@@ -210,6 +210,34 @@ describe('audit trail: public API call writes audit_logs', () => {
     expect(details.status).toBe(403);
     expect(details.app_id).toBe(appId);
   });
+
+  it('records a 401 when bearer authentication fails before app context exists', async () => {
+    const app = v1App();
+
+    const res = await request(app)
+      .get('/api/v1/documents');
+    expect(res.status).toBe(401);
+
+    const requestId = res.headers['x-request-id'] as string;
+    const row = await waitFor(async () => {
+      const r = await pool.query(
+        `SELECT * FROM audit_logs WHERE action='api.v1.call' AND details->>'request_id' = $1`,
+        [requestId],
+      );
+      return r.rows[0] ?? null;
+    });
+
+    expect(row).toBeTruthy();
+    expect(row.workspace_id).toBeNull();
+    expect(row.actor_user_id).toBeNull();
+    const details = typeof row.details === 'string' ? JSON.parse(row.details) : row.details;
+    expect(details.method).toBe('GET');
+    expect(details.route).toBe('/documents');
+    expect(details.status).toBe(401);
+    expect(details.scope).toBeNull();
+    expect(details.app_id).toBeNull();
+    expect(details.client_id).toBeNull();
+  });
 });
 
 // -----------------------------------------------------------------

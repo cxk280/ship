@@ -3,8 +3,9 @@
  *
  * This is a BRAND-NEW router that shares NO request-handling middleware with the
  * internal `/api/*` API (no session auth, no conditional CSRF, no internal rate
- * limiter). Its pipeline is: request-id → bearer auth → audit → rate-limit →
- * [resource routes, each declaring a scope] → 404 → public error handler.
+ * limiter). Its pipeline is: request-id → audit → json parser → bearer auth →
+ * rate-limit → [resource routes, each declaring a scope] → 404 → public error
+ * handler.
  *
  * Boundary rule (enforced by scripts/check-api-boundary.mjs): files under
  * platform/api/v1/** must NOT import from api/src outside platform/. Concrete
@@ -54,9 +55,10 @@ export interface PlatformDeps {
 }
 
 /**
- * Build the audit middleware. Runs AFTER bearerAuth so req.platformAuth is
- * populated. Registers a res.on('finish') listener to record status + latency
- * via deps.audit.record() without blocking the request path.
+ * Build the audit middleware. Runs immediately after request-id so every public
+ * request installs the finish listener, including malformed bodies and auth
+ * failures. Authenticated requests populate req.platformAuth later in the
+ * pipeline; unauthenticated failures are recorded with null app/user fields.
  */
 function createAuditMiddleware(audit: AuditPort): RequestHandler {
   return function auditMiddleware(req: Request, res: Response, next: NextFunction): void {
@@ -104,6 +106,10 @@ export function createV1Router(deps: PlatformDeps): Router {
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
 
+  // Install audit before parsing/auth so malformed bodies and authentication
+  // failures still produce a public API call audit row.
+  router.use(createAuditMiddleware(deps.audit));
+
   // The public edge owns its OWN body parsing — so a malformed body throws
   // INSIDE this router (after the request id is set) and is caught by the v1
   // apiErrorHandler below, guaranteeing the ApiError shape even on parse errors.
@@ -118,14 +124,10 @@ export function createV1Router(deps: PlatformDeps): Router {
   });
 
   // The public-edge gate, applied to every resource route in one place (the deck's
-  // chain): authN → audit → rate-limit → [requireScope per route] → handler. Keeping it
+  // chain): authN → rate-limit → [requireScope per route] → handler. Keeping it
   // here (not per-route) is why a route can't accidentally ship unauthenticated
   // or unthrottled.
   router.use(deps.bearerAuth);
-
-  // Audit middleware sits AFTER bearerAuth so req.platformAuth (app/user/workspace/scopes)
-  // is already populated when we register the finish listener.
-  router.use(createAuditMiddleware(deps.audit));
 
   router.use(deps.rateLimit);
 
