@@ -9,6 +9,7 @@ import { SprintsClient } from './resources/sprints.js';
 import { WebhooksClient } from './resources/webhooks.js';
 import { InMemoryTokenStore, type ITokenStore } from './token-store.js';
 import { runDeviceLogin, type DeviceLoginOptions } from './auth/device.js';
+import { runAuthorizationCodeFlow, type AuthorizationCodeFlowOptions } from './auth/authcode.js';
 import type { MeResponse } from './types.js';
 
 export interface ShipClientOptions {
@@ -51,6 +52,22 @@ export class ShipClient {
    */
   static async deviceLogin(opts: DeviceLoginOptions): Promise<ShipClient> {
     const result = await runDeviceLogin(opts);
+    return new ShipClient({
+      baseUrl: result.origin,
+      tokenStore: result.tokenStore,
+      clientId: opts.clientId,
+      clientSecret: opts.clientSecret,
+    });
+  }
+
+  /**
+   * Authorization Code + PKCE login (RFC 6749 §4.1 + RFC 7636) — the flow behind
+   * a browser SPA or a native app that can receive the redirect. Resolves to a
+   * ready-to-use ShipClient. Supply an `authorize` callback that drives the user
+   * agent to the returned URL and yields the redirect's `code`.
+   */
+  static async authorizationCodeFlow(opts: AuthorizationCodeFlowOptions): Promise<ShipClient> {
+    const result = await runAuthorizationCodeFlow(opts);
     return new ShipClient({
       baseUrl: result.origin,
       tokenStore: result.tokenStore,
