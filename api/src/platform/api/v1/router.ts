@@ -4,8 +4,8 @@
  * This is a BRAND-NEW router that shares NO request-handling middleware with the
  * internal `/api/*` API (no session auth, no conditional CSRF, no internal rate
  * limiter). Its pipeline is: request-id → audit → json parser → bearer auth →
- * rate-limit → [resource routes, each declaring a scope] → 404 → public error
- * handler.
+ * rate-limit → idempotency → [resource routes, each declaring a scope] → 404 →
+ * public error handler.
  *
  * Boundary rule (enforced by scripts/check-api-boundary.mjs): files under
  * platform/api/v1/** must NOT import from api/src outside platform/. Concrete
@@ -13,8 +13,9 @@
  * in the composition root (platform/composition.ts → app.ts).
  */
 import { Router, json, type RequestHandler, type Request, type Response, type NextFunction } from 'express';
-import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
-import type { IdentityPort, DocumentsPort, IssuesPort, SprintsPort, WebhooksPort, AuditPort } from './ports.js';
+import { createHash } from 'crypto';
+import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler, ApiError } from '../../errors.js';
+import type { IdentityPort, DocumentsPort, IssuesPort, SprintsPort, WebhooksPort, AuditPort, IdempotencyPort } from './ports.js';
 import { createMeRouter } from './me.js';
 import { createDocumentsRouter } from './documents.js';
 import { createIssuesRouter } from './issues.js';
@@ -52,6 +53,8 @@ export interface PlatformDeps {
   webhooks: WebhooksPort;
   /** Per-call audit trail — fire-and-forget, must not throw. */
   audit: AuditPort;
+  /** Idempotency store — exactly-once semantics for POST writes. */
+  idempotency: IdempotencyPort;
 }
 
 /**
@@ -99,6 +102,106 @@ function createAuditMiddleware(audit: AuditPort): RequestHandler {
   };
 }
 
+/**
+ * Compute a stable fingerprint for a request: sha256 of method + originalUrl +
+ * deterministically-serialized body.  Used by the idempotency middleware to
+ * detect key reuse with a different payload.
+ */
+function requestFingerprint(method: string, url: string, body: unknown): string {
+  const stable = JSON.stringify(body, Object.keys(body && typeof body === 'object' ? (body as Record<string, unknown>) : {}).sort());
+  return createHash('sha256').update(`${method}:${url}:${stable}`).digest('hex');
+}
+
+/**
+ * Idempotency middleware — Stripe-grade exactly-once semantics for POST writes.
+ *
+ * Only activates when:
+ *   - req.method === 'POST'
+ *   - The `Idempotency-Key` header is present
+ *
+ * Requires `deps.bearerAuth` to have already run so `req.platformAuth.appId` is
+ * available. Wire this AFTER bearerAuth + rateLimit.
+ *
+ * Fails OPEN: if the store throws unexpectedly, we log + call next() rather than
+ * blocking the write.
+ */
+function createIdempotencyMiddleware(store: IdempotencyPort): RequestHandler {
+  return async function idempotencyMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+    // Only POST writes opt in to idempotency.
+    if (req.method !== 'POST') {
+      next();
+      return;
+    }
+
+    const key = req.headers['idempotency-key'];
+    if (typeof key !== 'string' || key.length === 0) {
+      next();
+      return;
+    }
+
+    const appId = req.platformAuth?.appId;
+    if (!appId) {
+      // bearerAuth should have rejected unauthenticated requests before we get
+      // here, but defend against misconfiguration.
+      next();
+      return;
+    }
+
+    const fingerprint = requestFingerprint(req.method, req.originalUrl, req.body);
+
+    let result;
+    try {
+      result = await store.begin({ appId, key, fingerprint });
+    } catch (err) {
+      // Fail open: store hiccup must never block a write.
+      console.error('[idempotency] store.begin threw — failing open:', err);
+      next();
+      return;
+    }
+
+    if (result.kind === 'replay') {
+      res.setHeader('Idempotency-Replayed', 'true');
+      res.status(result.record.status).json(result.record.body);
+      return;
+    }
+
+    if (result.kind === 'conflict') {
+      // 409 with validation_failed code: the same key is in-flight concurrently.
+      // We use the fixed validation_failed code (no new codes allowed) but override
+      // the HTTP status directly so clients can distinguish conflict from a generic
+      // 400.  We call res.json() directly rather than next(err) to control the
+      // status without mutating ApiError.
+      const conflictErr = ApiError.validation('A request with this Idempotency-Key is already in progress');
+      res.status(409).json(conflictErr.toBody(req.requestId ?? ''));
+      return;
+    }
+
+    if (result.kind === 'mismatch') {
+      // 422: same key, different payload.
+      const mismatchErr = ApiError.validation('Idempotency-Key was reused with a different request');
+      res.status(422).json(mismatchErr.toBody(req.requestId ?? ''));
+      return;
+    }
+
+    // result.kind === 'new': monkeypatch res.json to capture the 2xx response
+    // and persist it, then signal the header so callers can detect replays.
+    res.setHeader('Idempotency-Replayed', 'false');
+    const originalJson = res.json.bind(res);
+    res.json = function captureJson(body: unknown) {
+      const status = res.statusCode;
+      if (status >= 200 && status < 300) {
+        // Fire-and-forget — never block the response.
+        store.complete({ appId, key, status, body }).catch((err: unknown) => {
+          console.error('[idempotency] store.complete threw:', err);
+        });
+      }
+      return originalJson(body);
+    };
+
+    next();
+  };
+}
+
 export function createV1Router(deps: PlatformDeps): Router {
   const router = Router();
 
@@ -124,12 +227,15 @@ export function createV1Router(deps: PlatformDeps): Router {
   });
 
   // The public-edge gate, applied to every resource route in one place (the deck's
-  // chain): authN → rate-limit → [requireScope per route] → handler. Keeping it
-  // here (not per-route) is why a route can't accidentally ship unauthenticated
-  // or unthrottled.
+  // chain): authN → rate-limit → idempotency → [requireScope per route] → handler.
+  // Keeping it here (not per-route) is why a route can't accidentally ship
+  // unauthenticated or unthrottled.
   router.use(deps.bearerAuth);
 
   router.use(deps.rateLimit);
+
+  // Idempotency sits AFTER auth (needs appId) and BEFORE resource routers.
+  router.use(createIdempotencyMiddleware(deps.idempotency));
 
   // Resource routers. Each route declares its scope via requireScope(...); /me is
   // identity (auth only, no specific scope).

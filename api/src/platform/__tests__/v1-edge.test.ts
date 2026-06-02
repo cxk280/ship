@@ -25,6 +25,7 @@ const stubDeps: PlatformDeps = {
     deactivateSubscription: vi.fn(), listDeliveries: vi.fn(), replay: vi.fn(),
   },
   audit: { record: vi.fn() },
+  idempotency: { begin: vi.fn(async () => ({ kind: 'new' as const })), complete: vi.fn(async () => {}) },
 };
 
 function app() {

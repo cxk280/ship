@@ -17,7 +17,7 @@ import { createDocumentsAdapter } from '../../../adapters/documents.js';
 import { createIssuesAdapter } from '../../../adapters/issues.js';
 import { createSprintsAdapter } from '../../../adapters/sprints.js';
 import { createV1Router } from '../router.js';
-import { stubWebhooks, stubAudit, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
+import { stubWebhooks, stubAudit, stubIdempotency, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
 
 let workspaceId: string;
 let userId: string;
@@ -35,7 +35,7 @@ function v1App() {
   a.use(express.json());
   a.use('/api/v1', createV1Router({
     bearerAuth, rateLimit: noRateLimit, identity: identityAdapter,
-    documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks, audit: stubAudit,
+    documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks, audit: stubAudit, idempotency: stubIdempotency,
   }));
   return a;
 }
