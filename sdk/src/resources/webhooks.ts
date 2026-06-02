@@ -65,6 +65,9 @@ export class WebhooksClient {
   }
 
   async replay(deliveryId: string): Promise<void> {
-    await this.http.request('POST', `/webhooks/deliveries/${encodeURIComponent(deliveryId)}/replay`, { body: {} });
+    // No request body: the spec declares POST .../replay with no requestBody
+    // (the delivery id in the path is the only input). Sending an empty `{}`
+    // body would drift from the contract — see the B2 parity oracle.
+    await this.http.request('POST', `/webhooks/deliveries/${encodeURIComponent(deliveryId)}/replay`);
   }
 }
