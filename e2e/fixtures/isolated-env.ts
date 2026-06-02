@@ -290,9 +290,18 @@ async function runMigrations(dbUrl: string): Promise<void> {
       )
     `);
 
-    // Step 3: Mark all migrations as applied since schema.sql represents the full current state.
-    // schema.sql includes all table definitions from all migrations, so running migrations
-    // again would fail on CREATE TABLE statements that don't use IF NOT EXISTS.
+    // Step 3: Mark/apply migrations.
+    //
+    // schema.sql covers the PRE-platform tables (001–039 era): those already exist
+    // after schema.sql ran, so we only MARK those migrations applied (re-running them
+    // would fail on CREATE TABLE without IF NOT EXISTS).
+    //
+    // The Plugforge platform tables (oauth_*, webhook_*) live ONLY in migrations 040+
+    // and are NOT in schema.sql, so we must actually RUN those so the e2e database has
+    // the OAuth/webhook schema (and the seeded grader/SPA/CLI/agent apps). This is what
+    // lets platform features (OAuth consent, /api/v1, webhooks) be exercised in browser
+    // e2e tests. All 040+ migrations are idempotent-or-additive and FK-safe on a fresh DB.
+    const PLATFORM_MIGRATION_FLOOR = '040';
     const migrationsDir = path.join(PROJECT_ROOT, 'api/src/db/migrations');
     let migrationFiles: string[] = [];
 
@@ -306,6 +315,11 @@ async function runMigrations(dbUrl: string): Promise<void> {
 
     for (const file of migrationFiles) {
       const version = file.replace('.sql', '');
+      // Zero-padded NNN prefixes compare correctly as strings.
+      if (version >= PLATFORM_MIGRATION_FLOOR) {
+        const sql = readFileSync(path.join(migrationsDir, file), 'utf-8');
+        await pool.query(sql);
+      }
       await pool.query(
         'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
         [version]

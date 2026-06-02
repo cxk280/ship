@@ -68,6 +68,86 @@ export const ListDocumentsQuerySchema = z.object({
   document_type: z.enum(DOC_TYPES).optional(),
 });
 
+// ---- Issues -----------------------------------------------------------------
+
+export const ISSUE_STATES = ['triage', 'backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled'] as const;
+export const ISSUE_PRIORITIES = ['urgent', 'high', 'medium', 'low', 'none'] as const;
+
+export const PublicIssueSchema = z
+  .object({
+    id: z.string().uuid(),
+    title: z.string(),
+    state: z.enum(ISSUE_STATES),
+    priority: z.enum(ISSUE_PRIORITIES),
+    assignee_id: z.string().uuid().nullable(),
+    due_date: z.string().nullable(),
+    properties: z.record(z.unknown()),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .openapi('Issue');
+
+export const IssuePageSchema = z
+  .object({
+    data: z.array(PublicIssueSchema),
+    next_cursor: z.string().nullable().openapi({ description: 'Opaque cursor to the next page, or null at the end.' }),
+  })
+  .openapi('IssuePage');
+
+export const CreateIssueSchema = z
+  .object({
+    title: z.string().min(1).max(500).default('Untitled'),
+    state: z.enum(ISSUE_STATES).optional().default('backlog'),
+    priority: z.enum(ISSUE_PRIORITIES).optional().default('medium'),
+    assignee_id: z.string().uuid().nullable().optional(),
+    due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    properties: z.record(z.unknown()).optional(),
+  })
+  .openapi('CreateIssue');
+
+export const IssueIdParamSchema = z.object({ id: z.string().uuid() });
+
+export const ListIssuesQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().optional(),
+  state: z.enum(ISSUE_STATES).optional(),
+  priority: z.enum(ISSUE_PRIORITIES).optional(),
+  assignee_id: z.string().uuid().optional(),
+});
+
+// ---- Sprints ----------------------------------------------------------------
+
+export const SPRINT_STATUSES = ['planned', 'active', 'completed'] as const;
+
+export const PublicSprintSchema = z
+  .object({
+    id: z.string().uuid(),
+    title: z.string(),
+    status: z.enum(SPRINT_STATUSES),
+    sprint_number: z.number().int().nullable(),
+    start_date: z.string().nullable(),
+    end_date: z.string().nullable(),
+    properties: z.record(z.unknown()),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .openapi('Sprint');
+
+export const SprintPageSchema = z
+  .object({
+    data: z.array(PublicSprintSchema),
+    next_cursor: z.string().nullable().openapi({ description: 'Opaque cursor to the next page, or null at the end.' }),
+  })
+  .openapi('SprintPage');
+
+export const SprintIdParamSchema = z.object({ id: z.string().uuid() });
+
+export const ListSprintsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  cursor: z.string().optional(),
+  status: z.enum(SPRINT_STATUSES).optional(),
+});
+
 export const WEBHOOK_EVENT_TYPES = [
   'document.created', 'document.updated', 'document.deleted',
   'issue.created', 'issue.assigned', 'issue.status_changed',

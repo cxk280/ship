@@ -16,6 +16,15 @@ import {
   CreateDocumentSchema,
   ListDocumentsQuerySchema,
   DocumentIdParamSchema,
+  PublicIssueSchema,
+  IssuePageSchema,
+  CreateIssueSchema,
+  ListIssuesQuerySchema,
+  IssueIdParamSchema,
+  PublicSprintSchema,
+  SprintPageSchema,
+  ListSprintsQuerySchema,
+  SprintIdParamSchema,
   MeResponseSchema,
   CreateSubscriptionSchema,
   SubscriptionSchema,
@@ -38,6 +47,11 @@ registry.register('ApiError', ApiErrorSchema);
 registry.register('Document', PublicDocumentSchema);
 registry.register('DocumentPage', DocumentPageSchema);
 registry.register('CreateDocument', CreateDocumentSchema);
+registry.register('Issue', PublicIssueSchema);
+registry.register('IssuePage', IssuePageSchema);
+registry.register('CreateIssue', CreateIssueSchema);
+registry.register('Sprint', PublicSprintSchema);
+registry.register('SprintPage', SprintPageSchema);
 registry.register('MeResponse', MeResponseSchema);
 registry.register('CreateSubscription', CreateSubscriptionSchema);
 registry.register('WebhookSubscription', SubscriptionSchema);
@@ -114,9 +128,78 @@ registry.registerPath({
   },
 });
 
-// ---- webhooks -------------------------------------------------------------
+// ---- issues ---------------------------------------------------------------
 
 const bearer = [{ bearerAuth: [] }];
+
+registry.registerPath({
+  method: 'get',
+  path: '/issues',
+  summary: 'List issues',
+  tags: ['issues'],
+  security: bearer,
+  request: { query: ListIssuesQuerySchema },
+  responses: {
+    200: { description: 'A page of issues', content: { 'application/json': { schema: IssuePageSchema } } },
+    ...errorResponses(400, 401, 403),
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/issues/{id}',
+  summary: 'Get an issue by id',
+  tags: ['issues'],
+  security: bearer,
+  request: { params: IssueIdParamSchema },
+  responses: {
+    200: { description: 'The issue', content: { 'application/json': { schema: PublicIssueSchema } } },
+    ...errorResponses(400, 401, 403, 404),
+  },
+});
+
+registry.registerPath({
+  method: 'post',
+  path: '/issues',
+  summary: 'Create an issue',
+  tags: ['issues'],
+  security: bearer,
+  request: { body: { content: { 'application/json': { schema: CreateIssueSchema } } } },
+  responses: {
+    201: { description: 'The created issue', content: { 'application/json': { schema: PublicIssueSchema } } },
+    ...errorResponses(400, 401, 403),
+  },
+});
+
+// ---- sprints --------------------------------------------------------------
+
+registry.registerPath({
+  method: 'get',
+  path: '/sprints',
+  summary: 'List sprints',
+  tags: ['sprints'],
+  security: bearer,
+  request: { query: ListSprintsQuerySchema },
+  responses: {
+    200: { description: 'A page of sprints', content: { 'application/json': { schema: SprintPageSchema } } },
+    ...errorResponses(400, 401, 403),
+  },
+});
+
+registry.registerPath({
+  method: 'get',
+  path: '/sprints/{id}',
+  summary: 'Get a sprint by id',
+  tags: ['sprints'],
+  security: bearer,
+  request: { params: SprintIdParamSchema },
+  responses: {
+    200: { description: 'The sprint', content: { 'application/json': { schema: PublicSprintSchema } } },
+    ...errorResponses(400, 401, 403, 404),
+  },
+});
+
+// ---- webhooks -------------------------------------------------------------
 
 registry.registerPath({
   method: 'post', path: '/webhooks', summary: 'Create a webhook subscription', tags: ['webhooks'], security: bearer,
