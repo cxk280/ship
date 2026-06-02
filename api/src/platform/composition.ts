@@ -15,6 +15,8 @@ import { createV1Router, type PlatformDeps } from './api/v1/router.js';
 import { bearerAuth } from './oauth/bearer.js';
 import { identityAdapter } from './adapters/identity.js';
 import { createDocumentsAdapter } from './adapters/documents.js';
+import { createIssuesAdapter } from './adapters/issues.js';
+import { createSprintsAdapter } from './adapters/sprints.js';
 import { createWebhooksAdapter } from './adapters/webhooks.js';
 import { InMemoryTokenBucketLimiter } from './ratelimit/limiter.js';
 import { createRateLimitMiddleware } from './ratelimit/middleware.js';
@@ -64,6 +66,8 @@ export function buildPlatform(): Platform {
     rateLimit: createRateLimitMiddleware({ perToken, perApp }),
     identity: identityAdapter,
     documents: createDocumentsAdapter(eventBus),
+    issues: createIssuesAdapter(eventBus),
+    sprints: createSprintsAdapter(),
     webhooks: createWebhooksAdapter(eventBus),
   };
   const v1Router = createV1Router(deps);

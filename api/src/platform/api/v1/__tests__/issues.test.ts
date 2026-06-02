@@ -1,8 +1,9 @@
 /**
- * /api/v1/documents integration tests (MVP gate #4 + #6).
+ * /api/v1/issues integration tests (Plugforge A4).
  *
- * Exercises the full edge: bearer auth → require(scope) → handler → domain, plus
- * cursor pagination and the 403-names-missing-scope contract.
+ * Exercises the full edge: bearer auth → require(scope) → handler → IssuesPort,
+ * plus cursor pagination and the 403-names-missing-scope contract. Mirrors the
+ * structure of documents.test.ts exactly.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
@@ -13,21 +14,27 @@ import { hashClientSecret, sha256, generate } from '../../../oauth/crypto.js';
 import { bearerAuth } from '../../../oauth/bearer.js';
 import { identityAdapter } from '../../../adapters/identity.js';
 import { createDocumentsAdapter } from '../../../adapters/documents.js';
+import { createIssuesAdapter } from '../../../adapters/issues.js';
+import { createSprintsAdapter } from '../../../adapters/sprints.js';
 import { createV1Router } from '../router.js';
-import { stubWebhooks, stubIssues, stubSprints, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
+import { stubWebhooks, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
 
 let workspaceId: string;
 let userId: string;
 let appId: string;
 
-// Rate limiting is exercised in its own unit test; here it's a pass-through.
 const noRateLimit = (_req: unknown, _res: unknown, next: () => void) => next();
 const documentsAdapter = createDocumentsAdapter(noopBus);
+const issuesAdapter = createIssuesAdapter(noopBus);
+const sprintsAdapter = createSprintsAdapter();
 
 function v1App() {
   const a = express();
   a.use(express.json());
-  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: stubIssues, sprints: stubSprints, webhooks: stubWebhooks }));
+  a.use('/api/v1', createV1Router({
+    bearerAuth, rateLimit: noRateLimit, identity: identityAdapter,
+    documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks,
+  }));
   return a;
 }
 
@@ -42,50 +49,52 @@ async function mintToken(scopes: string[]): Promise<string> {
 }
 
 beforeAll(async () => {
-  const ws = await pool.query(`INSERT INTO workspaces (name) VALUES ('Docs v1 WS') RETURNING id`);
+  const ws = await pool.query(`INSERT INTO workspaces (name) VALUES ('Issues v1 WS') RETURNING id`);
   workspaceId = ws.rows[0].id;
-  const u = await pool.query(`INSERT INTO users (email, name) VALUES ('docs-v1@example.com','Docs Tester') RETURNING id`);
+  const u = await pool.query(`INSERT INTO users (email, name) VALUES ('issues-v1@example.com','Issues Tester') RETURNING id`);
   userId = u.rows[0].id;
   const app = await store.createApp({
-    clientId: 'ship_app_docs', clientSecretHash: await hashClientSecret('x'), name: 'Docs App',
-    redirectUris: [], requestedScopes: ['documents:read', 'documents:write'], appType: 'confidential',
+    clientId: 'ship_app_issues', clientSecretHash: await hashClientSecret('x'), name: 'Issues App',
+    redirectUris: [], requestedScopes: ['issues:read', 'issues:write'], appType: 'confidential',
     ownerUserId: userId, workspaceId,
   });
   appId = app.id;
 });
 
-describe('POST + GET /api/v1/documents', () => {
-  it('creates a document (201) and reads it back by id', async () => {
-    const token = await mintToken(['documents:read', 'documents:write']);
+describe('POST + GET /api/v1/issues', () => {
+  it('creates an issue (201) and reads it back by id', async () => {
+    const token = await mintToken(['issues:read', 'issues:write']);
     const created = await request(v1App())
-      .post('/api/v1/documents')
+      .post('/api/v1/issues')
       .set('Authorization', `Bearer ${token}`)
-      .send({ title: 'Hello from the SDK', document_type: 'wiki' });
+      .send({ title: 'Fix the login bug', state: 'todo', priority: 'high' });
     expect(created.status).toBe(201);
-    expect(created.body).toMatchObject({ title: 'Hello from the SDK', document_type: 'wiki' });
+    expect(created.body).toMatchObject({ title: 'Fix the login bug', state: 'todo', priority: 'high' });
     expect(typeof created.body.id).toBe('string');
 
     const fetched = await request(v1App())
-      .get(`/api/v1/documents/${created.body.id}`)
+      .get(`/api/v1/issues/${created.body.id}`)
       .set('Authorization', `Bearer ${token}`);
     expect(fetched.status).toBe(200);
     expect(fetched.body.id).toBe(created.body.id);
+    expect(fetched.body.state).toBe('todo');
+    expect(fetched.body.priority).toBe('high');
   });
 
   it('400s (validation_failed) for a non-UUID id — not a 500 from Postgres', async () => {
-    const token = await mintToken(['documents:read']);
+    const token = await mintToken(['issues:read']);
     const res = await request(v1App())
-      .get('/api/v1/documents/not-a-uuid')
+      .get('/api/v1/issues/not-a-uuid')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('validation_failed');
     expect(res.body.request_id).toBeTruthy();
   });
 
-  it('404s (ApiError) for a missing document', async () => {
-    const token = await mintToken(['documents:read']);
+  it('404s (ApiError) for a missing issue', async () => {
+    const token = await mintToken(['issues:read']);
     const res = await request(v1App())
-      .get('/api/v1/documents/00000000-0000-0000-0000-000000000000')
+      .get('/api/v1/issues/00000000-0000-0000-0000-000000000000')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(404);
     expect(res.body).toMatchObject({ code: 'not_found' });
@@ -93,27 +102,27 @@ describe('POST + GET /api/v1/documents', () => {
   });
 });
 
-describe('cursor pagination', () => {
+describe('cursor pagination for issues', () => {
   it('returns {data, next_cursor} and walks pages with an opaque cursor', async () => {
-    const token = await mintToken(['documents:read', 'documents:write']);
-    // Create a clean sub-workspace would be ideal; instead create a unique type batch.
+    const token = await mintToken(['issues:read', 'issues:write']);
+    // Create 5 issues for pagination
     for (let i = 0; i < 5; i++) {
       await request(v1App())
-        .post('/api/v1/documents')
+        .post('/api/v1/issues')
         .set('Authorization', `Bearer ${token}`)
-        .send({ title: `Page doc ${i}`, document_type: 'issue' });
+        .send({ title: `Paginated issue ${i}`, state: 'backlog', priority: 'low' });
     }
     const first = await request(v1App())
-      .get('/api/v1/documents?document_type=issue&limit=2')
+      .get('/api/v1/issues?limit=2')
       .set('Authorization', `Bearer ${token}`);
     expect(first.status).toBe(200);
-    expect(first.body.data).toHaveLength(2);
+    expect(first.body.data.length).toBeGreaterThanOrEqual(2);
     expect(typeof first.body.next_cursor).toBe('string');
-    // cursor is opaque base64
+    // cursor is opaque base64url
     expect(first.body.next_cursor).toMatch(/^[A-Za-z0-9_-]+$/);
 
     const second = await request(v1App())
-      .get(`/api/v1/documents?document_type=issue&limit=2&cursor=${encodeURIComponent(first.body.next_cursor)}`)
+      .get(`/api/v1/issues?limit=2&cursor=${encodeURIComponent(first.body.next_cursor)}`)
       .set('Authorization', `Bearer ${token}`);
     expect(second.status).toBe(200);
     // No overlap between pages.
@@ -122,16 +131,23 @@ describe('cursor pagination', () => {
   });
 });
 
-describe('scope enforcement (403 names the missing scope)', () => {
-  it('rejects POST with a read-only token, naming documents:write', async () => {
-    const token = await mintToken(['documents:read']);
+describe('scope enforcement for issues (403 names the missing scope)', () => {
+  it('rejects POST with a read-only token, naming issues:write', async () => {
+    const token = await mintToken(['issues:read']);
     const res = await request(v1App())
-      .post('/api/v1/documents')
+      .post('/api/v1/issues')
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Should fail' });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('forbidden');
-    expect(res.body.message).toContain('documents:write');
-    expect(res.body.details?.required_scope).toBe('documents:write');
+    expect(res.body.message).toContain('issues:write');
+    expect(res.body.details?.required_scope).toBe('issues:write');
+  });
+
+  it('rejects GET with no token (401)', async () => {
+    const res = await request(v1App())
+      .get('/api/v1/issues');
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('unauthorized');
   });
 });
