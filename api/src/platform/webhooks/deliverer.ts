@@ -158,6 +158,25 @@ export async function processAttempt(
  * time. SNI/Host are preserved as the original hostname. Dev/test skips pinning so
  * localhost listeners (the TTFE drill) work.
  */
+/**
+ * Build a net.connect `lookup` that always resolves to the pre-vetted pinned IP
+ * (defeats DNS rebinding). It MUST honor the `all` option: Node 18+/20 enables
+ * `autoSelectFamily` by default, so http(s).request calls lookup with `{ all: true }`
+ * and expects an ARRAY back — returning the 3-arg (address, family) form there makes
+ * Node throw "Invalid IP address: undefined" before the request is ever sent. Handles
+ * both the array (all) and tuple (non-all) calling conventions.
+ */
+export function makePinnedLookup(
+  ip: string,
+  family: number,
+): (hostname: string, options: unknown, cb: (err: Error | null, address: unknown, family?: number) => void) => void {
+  return (_hostname, options, cb) => {
+    const wantsAll = !!(options && typeof options === 'object' && (options as { all?: boolean }).all);
+    if (wantsAll) cb(null, [{ address: ip, family }]);
+    else cb(null, ip, family);
+  };
+}
+
 export function fetchTransport(timeoutMs = 5000): Transport {
   return async (rawUrl, opts) => {
     let url: URL;
@@ -190,11 +209,7 @@ export function fetchTransport(timeoutMs = 5000): Transport {
     }
 
     const lib = url.protocol === 'https:' ? https : http;
-    // Inline lookup (avoid importing a named type that differs across @types/node).
-    const pinnedLookup = pinnedIp
-      ? (_host: string, _options: unknown, cb: (err: Error | null, addr: string, fam: number) => void) =>
-          cb(null, pinnedIp as string, pinnedFamily)
-      : undefined;
+    const pinnedLookup = pinnedIp ? makePinnedLookup(pinnedIp, pinnedFamily) : undefined;
 
     // Build options loosely so `lookup` (a net.connect option forwarded by
     // http.request) doesn't depend on a specific @types/node export.
