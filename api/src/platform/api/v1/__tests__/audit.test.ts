@@ -58,6 +58,7 @@ function v1App() {
     sprints: createSprintsAdapter(),
     webhooks: createWebhooksAdapter(bus),
     audit: createAuditAdapter(),
+    idempotency: { async begin() { return { kind: 'new' }; }, async complete() { /* no-op */ } },
   }));
   return a;
 }

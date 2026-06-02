@@ -21,6 +21,7 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 permissions:
+  contents: read
   statuses: write
   pull-requests: write
   issues: write
@@ -64,10 +65,51 @@ jobs:
                 })
                 .catch(() => {}); // ignore "label not present"
 
-            // New commits invalidate any prior approval (mirrors dismiss-stale-reviews).
+            // New commits invalidate any prior approval (mirrors dismiss-stale-reviews)
+            // — EXCEPT a no-op base merge ("Update branch"), which only brings already-
+            // reviewed base commits and must NOT nuke the owner's approval.
             if (action === 'synchronize') {
-              await removeLabel();
-              await setStatus('failure', 'New commits pushed — owner must re-approve');
+              const before = context.payload.before;
+              const nonMergeShas = async (b, h) => {
+                const r = await github.rest.repos.compareCommitsWithBasehead({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  basehead: `${b}...${h}`,
+                });
+                return r.data.commits
+                  .filter((c) => (c.parents?.length ?? 0) < 2) // exclude merge commits
+                  .map((c) => c.sha)
+                  .sort();
+              };
+
+              let addedRealCode = true; // fail safe: on uncertainty, require re-approval
+              try {
+                if (before && before !== '0000000000000000000000000000000000000000') {
+                  // The PR's own (non-merge) commits relative to base, before vs after the
+                  // push. Identical set → nothing new was authored; it was just a base merge.
+                  const [after_, before_] = await Promise.all([
+                    nonMergeShas(pr.base.sha, pr.head.sha),
+                    nonMergeShas(pr.base.sha, before),
+                  ]);
+                  addedRealCode = JSON.stringify(after_) !== JSON.stringify(before_);
+                }
+              } catch {
+                addedRealCode = true;
+              }
+
+              if (addedRealCode) {
+                await removeLabel();
+                await setStatus('failure', 'New commits pushed — owner must re-approve');
+              } else {
+                // "Update branch" / base merge only: preserve the existing approval.
+                const stillApproved = (pr.labels || []).some((l) => l.name === LABEL);
+                await setStatus(
+                  stillApproved ? 'success' : 'pending',
+                  stillApproved
+                    ? 'Approval preserved across base merge ("Update branch")'
+                    : `Awaiting owner approval — add the "${LABEL}" label`,
+                );
+              }
               return;
             }
 
