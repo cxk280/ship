@@ -51,6 +51,8 @@ function publicAppView(row: {
   app_type: string;
   is_active: boolean;
   created_at: string;
+  secret_revoked_at?: string | null;
+  secret_revoked_reason?: string | null;
 }) {
   return {
     id: row.id,
@@ -62,6 +64,10 @@ function publicAppView(row: {
     app_type: row.app_type,
     is_active: row.is_active,
     created_at: row.created_at,
+    // B13: surface a leaked-secret revocation so the owner knows to rotate.
+    secret_revoked: Boolean(row.secret_revoked_at),
+    secret_revoked_at: row.secret_revoked_at ?? null,
+    secret_revoked_reason: row.secret_revoked_reason ?? null,
   };
 }
 

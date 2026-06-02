@@ -18,6 +18,8 @@ export interface OAuthAppRow {
   workspace_id: string | null;
   is_active: boolean;
   secret_rotated_at: string | null;
+  secret_revoked_at: string | null;
+  secret_revoked_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -187,14 +189,92 @@ export async function listAppsByOwner(ownerUserId: string): Promise<OAuthAppRow[
 }
 
 export async function rotateAppSecret(id: string, newHash: string): Promise<void> {
+  // Rotating a secret is also the re-issue path after a leak: clear any
+  // leaked-secret revocation so the freshly-issued secret authenticates again.
   await pool.query(
-    'UPDATE oauth_apps SET client_secret_hash = $2, secret_rotated_at = now(), updated_at = now() WHERE id = $1',
+    `UPDATE oauth_apps
+        SET client_secret_hash = $2,
+            secret_rotated_at = now(),
+            secret_revoked_at = NULL,
+            secret_revoked_reason = NULL,
+            updated_at = now()
+      WHERE id = $1`,
     [id, newHash],
   );
 }
 
 export async function deactivateApp(id: string): Promise<void> {
   await pool.query('UPDATE oauth_apps SET is_active = FALSE, updated_at = now() WHERE id = $1', [id]);
+}
+
+/**
+ * All confidential / first-party apps whose secret is currently live (active,
+ * not already secret-revoked). Used by leaked-secret detection to find which app
+ * a presented raw secret belongs to via a bcrypt compare (secrets are salted, so
+ * there is no reverse hash lookup). Public apps are excluded — they have no
+ * meaningful secret.
+ */
+export async function listAppsWithLiveSecret(): Promise<OAuthAppRow[]> {
+  const r = await pool.query(
+    `SELECT * FROM oauth_apps
+      WHERE is_active = TRUE
+        AND secret_revoked_at IS NULL
+        AND app_type IN ('confidential', 'first_party')`,
+  );
+  return r.rows as OAuthAppRow[];
+}
+
+/**
+ * Mark an app's client secret as revoked (leaked-secret response) and cascade-
+ * revoke every live access + refresh token the app holds, in one transaction.
+ * Returns the count of access + refresh tokens revoked. Idempotent: re-running
+ * for an already-revoked secret leaves secret_revoked_at unchanged and revokes
+ * nothing further.
+ */
+export async function revokeAppSecretAndTokens(
+  appId: string,
+  reason: string,
+): Promise<{ alreadyRevoked: boolean; accessRevoked: number; refreshRevoked: number }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const mark = await client.query(
+      `UPDATE oauth_apps
+          SET secret_revoked_at = now(),
+              secret_revoked_reason = $2,
+              updated_at = now()
+        WHERE id = $1 AND secret_revoked_at IS NULL
+        RETURNING id`,
+      [appId, reason],
+    );
+    const alreadyRevoked = (mark.rowCount ?? 0) === 0;
+
+    const access = await client.query(
+      `UPDATE oauth_access_tokens
+          SET revoked_at = now()
+        WHERE app_id = $1 AND revoked_at IS NULL`,
+      [appId],
+    );
+    const refresh = await client.query(
+      `UPDATE oauth_refresh_tokens
+          SET revoked_at = now()
+        WHERE app_id = $1 AND revoked_at IS NULL`,
+      [appId],
+    );
+
+    await client.query('COMMIT');
+    return {
+      alreadyRevoked,
+      accessRevoked: access.rowCount ?? 0,
+      refreshRevoked: refresh.rowCount ?? 0,
+    };
+  } catch (err) {
+    await rollbackQuietly(client);
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // ---- authorization codes --------------------------------------------------
