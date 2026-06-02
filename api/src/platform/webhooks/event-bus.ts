@@ -60,6 +60,53 @@ export class InMemoryEventBus implements IEventBus {
   }
 
   /**
+   * Send a synthetic test event to a single specific subscription (bypasses
+   * the normal fan-out and workspace matching).  The payload is a realistic
+   * document.created envelope with `"test": true` so subscribers can identify
+   * it.  Returns the new delivery record (status will reflect the actual HTTP
+   * response from the target URL).
+   */
+  async sendTestEvent(subscriptionId: string): Promise<store.DeliveryRow | null> {
+    const sub = await store.getSubscription(subscriptionId);
+    if (!sub) return null;
+
+    const idempotencyKey = `test_${randomUUID()}`;
+    const testPayload = {
+      id: '00000000-0000-0000-0000-000000000000',
+      document_type: 'wiki',
+      title: 'Test Event',
+      workspace_id: sub.workspace_id ?? '00000000-0000-0000-0000-000000000000',
+      test: true,
+    };
+    // Persist a synthetic event row so the delivery has a valid FK.
+    const eventRow = await store.insertEvent({
+      eventType: 'document.created',
+      workspaceId: sub.workspace_id,
+      payload: testPayload,
+      idempotencyKey,
+    });
+    const envelope: WebhookEnvelope = {
+      id: eventRow.id,
+      type: 'document.created',
+      created: Math.floor(this.deps.clock.now() / 1000),
+      data: testPayload,
+    };
+    const delivery = await store.insertDelivery({
+      subscriptionId: sub.id,
+      eventId: eventRow.id,
+      eventType: 'document.created',
+      idempotencyKey,
+    });
+    this.deps.deliverer.enqueue({
+      deliveryId: delivery.id,
+      subscription: { id: sub.id, targetUrl: sub.target_url, signingSecret: sub.signing_secret },
+      envelope,
+      idempotencyKey,
+    });
+    return delivery;
+  }
+
+  /**
    * Replay a logged delivery: create a NEW delivery for the same subscription
    * carrying the ORIGINAL idempotency key (so subscribers can dedupe).
    */
