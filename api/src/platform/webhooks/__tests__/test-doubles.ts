@@ -3,7 +3,7 @@
  * doubles for every interface"). Not a test file (no `.test.ts`), just helpers.
  */
 import type { IEventBus } from '../event-bus.js';
-import type { WebhooksPort, PublicSubscription, IssuesPort, SprintsPort, AuditPort } from '../../api/v1/ports.js';
+import type { WebhooksPort, PublicSubscription, IssuesPort, SprintsPort, AuditPort, IdempotencyPort } from '../../api/v1/ports.js';
 
 /** No-op event bus — swallows publishes (delivery is tested separately). */
 export const noopBus: IEventBus = {
@@ -69,5 +69,19 @@ export const stubWebhooks: WebhooksPort = {
   },
   async replay() {
     return true;
+  },
+};
+
+/**
+ * Stub IdempotencyPort — always returns 'new' so existing tests are unaffected.
+ * Tests that exercise idempotency semantics use the real adapter or a custom
+ * in-memory double.
+ */
+export const stubIdempotency: IdempotencyPort = {
+  async begin() {
+    return { kind: 'new' };
+  },
+  async complete() {
+    /* no-op */
   },
 };

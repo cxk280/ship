@@ -28,13 +28,25 @@ export interface WebhookDelivery {
   created_at: string;
 }
 
+export interface CreateWebhookOptions {
+  /**
+   * Stripe-grade idempotency: pass a unique client-generated key to guarantee
+   * exactly-once semantics. Retrying the same request with the same key returns
+   * the original response without creating a duplicate subscription.
+   */
+  idempotencyKey?: string;
+}
+
 export class WebhooksClient {
   constructor(private readonly http: Http) {}
 
   /** Subscribe to an event. Returns the subscription + its one-time signing_secret. */
-  create(input: { event: string; target_url: string }): Promise<CreatedSubscription> {
+  create(input: { event: string; target_url: string }, opts: CreateWebhookOptions = {}): Promise<CreatedSubscription> {
+    const headers: Record<string, string> = {};
+    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
     return this.http.request<CreatedSubscription>('POST', '/webhooks', {
       body: { event_type: input.event, target_url: input.target_url },
+      headers,
     });
   }
 
