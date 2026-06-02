@@ -1,0 +1,91 @@
+name: Owner Approval Gate
+
+# Requires the repo owner's EXPLICIT approval before any PR can merge — fully
+# independent of the automated Codex review, which is advisory only.
+#
+# Why a status check instead of a GitHub review:
+#   Our PRs are authored by the owner (cxk280). GitHub forbids approving your own
+#   pull request, so a native "required review" can never be satisfied on a
+#   self-authored PR. This gate sets a commit *status* ("owner-approval") that the
+#   owner flips green by adding the "Approved" label — which is allowed on your own
+#   PR. New commits remove the label and reset the status (mirrors dismiss-stale).
+#
+# Why pull_request_target:
+#   The gate logic always runs from the DEFAULT branch (master) for every PR —
+#   including PRs that don't contain this file (so it governs the currently-open
+#   PRs too) — and cannot be altered by PR contents. We never check out or execute
+#   PR code here, so the privileged token is safe.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  statuses: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: owner-approval-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: owner-approval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const APPROVERS = ['cxk280'];   // logins permitted to approve
+            const LABEL = 'Approved';
+            const STATUS = 'owner-approval'; // MUST match the required status check context
+            const pr = context.payload.pull_request;
+            const action = context.payload.action;
+            const sender = context.payload.sender.login;
+
+            const setStatus = (state, description) =>
+              github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: pr.head.sha,
+                context: STATUS,
+                state, // 'success' | 'pending' | 'failure'
+                description: description.slice(0, 140),
+              });
+
+            const removeLabel = () =>
+              github.rest.issues
+                .removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  name: LABEL,
+                })
+                .catch(() => {}); // ignore "label not present"
+
+            // New commits invalidate any prior approval (mirrors dismiss-stale-reviews).
+            if (action === 'synchronize') {
+              await removeLabel();
+              await setStatus('failure', 'New commits pushed — owner must re-approve');
+              return;
+            }
+
+            // Only the owner may apply the approval label; strip it from anyone else.
+            if (
+              action === 'labeled' &&
+              context.payload.label.name === LABEL &&
+              !APPROVERS.includes(sender)
+            ) {
+              await removeLabel();
+              await setStatus('failure', `Only ${APPROVERS.join(', ')} may approve this PR`);
+              return;
+            }
+
+            const approved = (pr.labels || []).some((l) => l.name === LABEL);
+            await setStatus(
+              approved ? 'success' : 'pending',
+              approved
+                ? `Approved by owner via "${LABEL}" label`
+                : `Awaiting owner approval — add the "${LABEL}" label`,
+            );
