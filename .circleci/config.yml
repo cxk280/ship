@@ -134,6 +134,37 @@ jobs:
           name: Time-to-First-Event drill (login → create document → verified signed webhook)
           command: pnpm drill:ttfe
 
+  perf_regression:
+    # PRD perf budget: per-route query counts and SDK install size must stay
+    # within the documented limits (+10% of the Part-1 baseline / <250KB). Each
+    # gate exits non-zero on regression, failing the build.
+    docker:
+      - image: cimg/node:20.18
+        environment:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://postgres@localhost:5432/ship_test
+      - image: cimg/postgres:16.4
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: ship_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+    steps:
+      - setup_node
+      - run:
+          name: Wait for Postgres
+          command: for i in $(seq 1 30); do (echo > /dev/tcp/localhost/5432) >/dev/null 2>&1 && exit 0; sleep 1; done; echo "postgres not ready"; exit 1
+      - run:
+          name: Migrate + seed (query-count flow logs in as the seeded user)
+          command: |
+            pnpm --filter @ship/api db:migrate
+            pnpm --filter @ship/api db:seed
+      - run:
+          name: Per-route query-count budget (+10% of baseline)
+          command: pnpm --filter @ship/api exec tsx "$(pwd)/scripts/shipshape-query-count.ts"
+      - run:
+          name: SDK install-size budget (<250 KB gzipped, zero runtime deps)
+          command: node scripts/check-sdk-bundle-size.mjs
+
   deploy_railway:
     parameters:
       railway_environment:
@@ -169,11 +200,13 @@ workflows:
           requires: [install_build]
       - ttfe_drill:
           requires: [install_build]
+      - perf_regression:
+          requires: [install_build]
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
           railway_token_env: RAILWAY_TOKEN_DEV
-          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill]
+          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill, perf_regression]
           filters:
             branches:
               only: master

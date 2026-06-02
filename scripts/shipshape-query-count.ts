@@ -73,10 +73,16 @@ async function main() {
   const measuredRecords = records.filter(record => !record.sql.startsWith('INSERT INTO sessions'));
   const slowest = [...measuredRecords].sort((a, b) => b.durationMs - a.durationMs).slice(0, 5);
 
+  const baselineQueries = 33;
+  // PRD perf budget: per-route query counts must stay within +10% of the Part-1 baseline.
+  const ceiling = Math.ceil(baselineQueries * 1.1);
+  const totalQueries = perEndpoint.reduce((sum, endpoint) => sum + endpoint.queries, 0);
+
   console.log(JSON.stringify({
     flow: endpoints,
-    totalQueries: perEndpoint.reduce((sum, endpoint) => sum + endpoint.queries, 0),
-    baselineQueries: 33,
+    totalQueries,
+    baselineQueries,
+    ceiling,
     targetQueries: 26,
     perEndpoint,
     slowest: slowest.map(record => ({
@@ -84,6 +90,15 @@ async function main() {
       sql: record.sql.slice(0, 240),
     })),
   }, null, 2));
+
+  if (totalQueries > ceiling) {
+    console.error(
+      `\n❌ Query-count regression: ${totalQueries} queries exceeds the +10% budget (${ceiling}, baseline ${baselineQueries}).`,
+    );
+    process.exitCode = 1;
+  } else {
+    console.log(`\n✓ Query count ${totalQueries} within budget (≤ ${ceiling}).`);
+  }
 }
 
 main()
