@@ -7,7 +7,7 @@ name: Owner Approval Gate
 #   Our PRs are authored by the owner (cxk280). GitHub forbids approving your own
 #   pull request, so a native "required review" can never be satisfied on a
 #   self-authored PR. This gate sets a commit *status* ("owner-approval") that the
-#   owner flips green by adding the "approved" label — which is allowed on your own
+#   owner flips green by adding the "Approved" label — which is allowed on your own
 #   PR. New commits remove the label and reset the status (mirrors dismiss-stale).
 #
 # Why pull_request_target:
@@ -38,7 +38,7 @@ jobs:
         with:
           script: |
             const APPROVERS = ['cxk280'];   // logins permitted to approve
-            const LABEL = 'approved';
+            const LABEL = 'Approved';
             const STATUS = 'owner-approval'; // MUST match the required status check context
             const pr = context.payload.pull_request;
             const action = context.payload.action;

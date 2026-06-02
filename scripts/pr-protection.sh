@@ -5,7 +5,7 @@
 #
 # The gate model:
 #   • The owner (cxk280) is ALWAYS the final approver. They approve a PR by adding
-#     the "approved" label, which turns the required "owner-approval" status check
+#     the "Approved" label, which turns the required "owner-approval" status check
 #     green. New commits reset it. This works on self-authored PRs (GitHub forbids
 #     approving your own PR; a label/status is not a "review").
 #   • The Codex review bot is ADVISORY ONLY. required_pull_request_reviews is null,
@@ -30,7 +30,7 @@ set -euo pipefail
 REPO="${PR_PROTECTION_REPO:-cxk280/ship}"
 BRANCH="${PR_PROTECTION_BRANCH:-master}"
 API="repos/${REPO}/branches/${BRANCH}/protection"
-APPROVE_LABEL="approved"
+APPROVE_LABEL="Approved"
 
 ensure_label() {
   gh label create "${APPROVE_LABEL}" \
