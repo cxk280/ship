@@ -14,7 +14,8 @@ Format: Before → Fix → After → Proof.
 - `api/src/platform/oauth/crypto.ts` — PKCE `verifyPkce` (SHA-256 challenge), bcrypt `hashClientSecret`/`verifyClientSecret`, secure random token generation.
 - `api/src/platform/scopes/registry.ts` — `ScopeRegistry` with seven scopes registered as data.
 - `api/src/db/migrations/040_plugforge_oauth.sql` — all OAuth tables.
-- `api/src/db/migrations/041_plugforge_grader_app.sql` — seeds grader + CLI demo apps.
+- `api/src/db/migrations/041_plugforge_grader_app.sql` — seeds only the read-only `ship_app_grader` app (scopes: documents:read, issues:read, sprints:read; client_credentials).
+- `api/src/db/migrations/043_plugforge_cli_app.sql` — seeds the public `ship_app_cli` app for the CLI device flow.
 - `api/src/platform/apps/routes.ts` — `/api/oauth/apps` bootstrap endpoint (session-authenticated).
 - `api/src/platform/oauth/routes.ts` — `/oauth/authorize`, `/oauth/token`, `/oauth/device/code`, `/oauth/device/verify`.
 
@@ -140,7 +141,7 @@ Format: Before → Fix → After → Proof.
 - `api/src/platform/adapters/webhooks.ts` — `WebhooksPort` impl connecting the v1 routes to the webhook store and event bus.
 - `sdk/src/webhooks/verify.ts` — `verifyWebhook` (subscriber-side SDK helper).
 
-**After.** A `POST /api/v1/documents` triggers `document.created` → matched subscriptions → signed delivery → retry on 5xx → dead-letter after 6 failures → replay with original idempotency key. The TTFE drill (`pnpm drill ttfe`) proves this end-to-end in CI in < 60 seconds.
+**After.** A `POST /api/v1/documents` triggers `document.created` → matched subscriptions → signed delivery → retry on 5xx → dead-letter after 6 failures → replay with original idempotency key. The TTFE drill (`pnpm drill:ttfe`, or `pnpm --filter @ship/cli drill ttfe`) proves this end-to-end locally in < 60 seconds. The drill is not yet wired into CI; CI wiring is planned.
 
 **Proof.**
 - `api/src/platform/webhooks/__tests__/signer.test.ts` — sign/verify roundtrip, tampered body rejected, expired timestamp rejected, cross-check with SDK `computeSignature`.

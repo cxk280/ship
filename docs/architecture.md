@@ -124,7 +124,7 @@ These doubles are wired directly in the test instead of calling `buildPlatform()
 
 ## Public/Internal Boundary
 
-The boundary is a **one-way door**: files under `api/src/platform/api/v1/` may import only within `api/src/platform/`. Files under `integrations/` may import only `@ship/sdk`. The lint rule in `scripts/check-api-boundary.mjs` walks the import graph at CI time and exits non-zero on any violation. The test `api/src/platform/__tests__/boundary.test.ts` runs the same check inside vitest so CI catches it on every PR.
+The boundary is a **one-way door**: files under `api/src/platform/api/v1/` may import only within `api/src/platform/`. Files under `integrations/` may import only `@ship/sdk`. The lint rule in `scripts/check-api-boundary.mjs` walks the import graph and exits non-zero on any violation. The test `api/src/platform/__tests__/boundary.test.ts` runs the same check inside vitest, so it fails as part of `pnpm test`.
 
 ```
   Browser / CLI / Agent
@@ -281,7 +281,9 @@ All exports are from `sdk/src/index.ts`. The SDK has zero runtime npm dependenci
 
 ## Agent-as-Citizen
 
-**Before (current, direct-domain path):**
+> **Status: PLANNED — NOT YET IMPLEMENTED.** Epic 7 (the agent rewire) has no code on master. There is no `AGENT_USE_SDK` feature flag and no agent-via-SDK path today. The diagrams below describe the planned design only.
+
+**Before (current state on master, direct-domain path):**
 
 ```
 Agent (FleetGraph)
@@ -293,14 +295,14 @@ api/src/services/*  (domain services)
 PostgreSQL
 ```
 
-The agent bypasses auth, scope checks, rate limiting, and audit entirely. It is a privileged insider.
+The agent bypasses auth, scope checks, rate limiting, and audit entirely. It is a privileged insider. This is the only path that exists today.
 
 **After (planned — Epic 7, NOT YET IMPLEMENTED):**
 
 ```
 Agent (FleetGraph)
     │  client_credentials grant (first-party M2M OAuth app)
-    │  seeded by migration 041_plugforge_grader_app.sql
+    │  (planned: agent app seeded via a future migration)
     ▼
 ShipClient (@ship/sdk)
     │  Bearer token in Authorization header
@@ -314,10 +316,10 @@ adapters/  →  domain services
 PostgreSQL
 
       ↓ side-effect at public edge
-  audit log row: { app: 'fleet-graph', scope, route, status }
+  audit log row: { app, scope, route, status }
 ```
 
-The agent becomes a first-party OAuth application (`app_type = 'first_party'`) registered by migration `api/src/db/migrations/041_plugforge_grader_app.sql`. It uses `client_credentials` (RFC 6749 §4.4) — appropriate for machine-to-machine where no user-delegation is needed. The Epic 7 rewire is behind a feature flag so Part 2 tests pass with the flag on or off. **This path is the planned design; the rewire is not yet merged to master.**
+The planned design makes the agent a first-party OAuth application using `client_credentials` (RFC 6749 §4.4) — appropriate for machine-to-machine where no user-delegation is needed. The intent is to gate the rewire behind a feature flag so Part 2 tests pass with the flag on or off, and to seed the agent's OAuth app via a dedicated migration. **None of this is built yet; the rewire is not on master.** (Note: migration `041_plugforge_grader_app.sql` seeds the read-only `ship_app_grader` app for graders — it does NOT seed an agent app.)
 
 ---
 

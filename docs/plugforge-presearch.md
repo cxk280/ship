@@ -10,11 +10,11 @@ Answers to the PRD Appendix Pre-Search Checklist (Phases 1–3), reflecting deci
 
 **API request rate and webhook fan-out.** The demo window involves 1 grader app with 1–3 webhook subscriptions. Expected rate: < 100 API calls during the demo. Fan-out is therefore 1–3 deliveries per event — trivially within the in-memory deliverer's capacity. The in-memory `QueueWebhookDeliverer` starts dropping below the 2-second P95 target at sustained fan-out of ~50+ concurrent subscriptions per event on a single process; that threshold is far above demo requirements.
 
-**OAuth apps and subscriptions seeded for the grader.** Migration `041_plugforge_grader_app.sql` seeds one confidential OAuth app (`fleet-graph-agent`) and one public app (`ship-cli-demo`) with read-only scopes. One webhook subscription is created by the TTFE drill at runtime.
+**OAuth apps and subscriptions seeded for the grader.** Migration `041_plugforge_grader_app.sql` seeds exactly one OAuth app: `ship_app_grader`, a confidential client with read-only scopes (`documents:read`, `issues:read`, `sprints:read`) using the `client_credentials` grant. Migration `043_plugforge_cli_app.sql` separately seeds `ship_app_cli`, a public client for the CLI's device flow. Webhook subscriptions are created at runtime by the TTFE drill, not by a migration.
 
 **Concurrent CLI device flows.** A single demo CLI session. Slow-down semantics are implemented (`slow_down` error when polling faster than `interval_sec = 5`) and tested in `api/src/platform/oauth/__tests__/oauth-service.test.ts`.
 
-**Delivery-log growth.** 1 delivery per TTFE drill run. 100 CI runs ≈ 100 rows. Retention: 30 days; rows are small (~500 bytes each). Not a concern for the demo window.
+**Delivery-log growth.** 1 delivery per TTFE drill run. ~100 drill runs ≈ 100 rows. Retention: 30 days; rows are small (~500 bytes each). Not a concern for the demo window.
 
 ### 1.2 — Budget & Cost Ceilings
 
@@ -28,7 +28,7 @@ Answers to the PRD Appendix Pre-Search Checklist (Phases 1–3), reflecting deci
 
 ### 1.3 — Timeline & Scope Reality
 
-**Must-ship epics.** All seven epics are implemented (E1–E7 OAuth foundation through webhooks). E7 (agent rewire) is the single planned-not-built item.
+**Must-ship epics.** The platform epics are implemented: OAuth foundation, public API boundary, documents resource, OpenAPI/fitness, SDK, rate limiting, and the webhook pipeline. The CLI reference integration (`@ship/cli`) and the TTFE drill are also built. The agent-as-citizen rewire (the assignment's Epic 7 payoff) is the single planned-not-built item — no agent-via-SDK code exists on master.
 
 **Reference integration.** CLI is the must-ship integration. The SDK and `runDeviceLogin()` implement the `ship login` / `ship docs create` / `ship webhooks tail` story.
 
@@ -106,15 +106,17 @@ Answers to the PRD Appendix Pre-Search Checklist (Phases 1–3), reflecting deci
 
 **Webhook payload display.** Not implemented in the portal UI. The delivery log shows `event_type`, `status`, `attempt_number`, `response_status`, and `idempotency_key` — not the payload body. Payload bodies are not stored in the delivery log; they can be re-fetched from the event store if needed.
 
-### 2.6 — Agent-as-Citizen Rewire (Planned)
+### 2.6 — Agent-as-Citizen Rewire (PLANNED — NOT YET IMPLEMENTED)
 
-**OAuth flow for the agent.** Client credentials (RFC 6749 §4.4). The agent is a first-party machine-to-machine client with no delegated user context — client credentials is the correct grant. Authorization Code would require a browser; Device Grant is designed for interactive CLIs.
+> No agent-rewire code exists on master. The answers below describe the planned design only.
 
-**Agent app seeding.** Seeded by migration `api/src/db/migrations/041_plugforge_grader_app.sql`. This guarantees it exists in all deployed environments automatically.
+**OAuth flow for the agent (planned).** Client credentials (RFC 6749 §4.4). The agent would be a first-party machine-to-machine client with no delegated user context — client credentials is the correct grant. Authorization Code would require a browser; Device Grant is designed for interactive CLIs.
 
-**Scopes the agent requests.** `documents:read`, `documents:write`, `issues:read`, `issues:write`, `sprints:read`. The agent needs write scopes because it creates and updates documents on behalf of users. It does not need `webhooks:manage` — the agent does not register webhook subscriptions.
+**Agent app seeding (planned).** The agent's OAuth app would be seeded via a dedicated future migration. Note: migration `041_plugforge_grader_app.sql` seeds the read-only `ship_app_grader` app for graders — it does NOT seed an agent app. No agent app is seeded today.
 
-**Feature flag.** Epic 7 is behind `AGENT_USE_SDK=true`. Part 2 tests pass with the flag off (direct service calls); with the flag on, the agent uses the SDK and the audit log shows OAuth app authentication. Both paths are tested in CI.
+**Scopes the agent would request (planned).** `documents:read`, `documents:write`, `issues:read`, `issues:write`, `sprints:read`. The agent needs write scopes because it creates and updates documents on behalf of users. It would not need `webhooks:manage` — the agent does not register webhook subscriptions.
+
+**Feature flag (planned).** The intent is to gate the rewire behind a feature flag (e.g. an `AGENT_USE_SDK` toggle) so Part 2 tests pass with the flag off (direct service calls) or on (SDK calls, audit log shows OAuth app authentication). **This flag does not exist yet and neither path is wired or tested.**
 
 ---
 
@@ -132,7 +134,7 @@ Answers to the PRD Appendix Pre-Search Checklist (Phases 1–3), reflecting deci
 
 ### 3.2 — Testing Strategy
 
-**TTFE drill construction.** Workspace-symlink with install step mocked (the SDK is consumed as a local workspace package via `pnpm` workspaces). This is faster in CI (no network install) and proves the contract because the drill tests the same code path that a real `npm install @ship/sdk` would use. The distinction is acknowledged: a full clean-container install would additionally test the published package metadata.
+**TTFE drill construction.** Workspace-symlink with the install step mocked (the SDK is consumed as a local workspace package via `pnpm` workspaces). The drill is run via `pnpm drill:ttfe`. This is faster than a network install and proves the contract because the drill exercises the same code path that a real `npm install @ship/sdk` would use. The distinction is acknowledged: a full clean-container install would additionally test the published package metadata. **The drill is not yet wired into CI; CI wiring is planned.**
 
 **OAuth Playwright tests.** In-process with supertest — no containerized auth server. The consent page HTML is rendered by the server and the form POST is tested with raw HTTP calls. This trades fidelity (no real browser rendering) for speed (no browser binary, < 1 s per test). A full Playwright browser test for the consent UI is a noted gap.
 
@@ -150,14 +152,14 @@ Answers to the PRD Appendix Pre-Search Checklist (Phases 1–3), reflecting deci
 
 **Deployed instance.** Ship is deployed to AWS Elastic Beanstalk. The OpenAPI spec is served live at `/api/v1/openapi.json` on the deployed instance and also available as `docs/openapi.json` in the repo (written at build time by `openapi/write-static.ts`).
 
-**Grader setup.** Migration 041 pre-registers one OAuth app. Grader credentials are in the README.
+**Grader setup.** Migration `041_plugforge_grader_app.sql` pre-registers the read-only `ship_app_grader` OAuth app. Grader credentials are in the README.
 
-**One-command CLI setup.** `pnpm install @ship/sdk && pnpm --filter @ship/cli-demo link` (or `npx ship-cli`). Documented in the README.
+**One-command CLI setup.** The CLI is the `@ship/cli` workspace package under `integrations/cli/`, exposing the `ship` binary. Run `pnpm --filter @ship/cli build` then `ship login`. The full TTFE loop is `pnpm drill:ttfe`. Documented in the README.
 
 ### 3.5 — Observability of API Usage
 
 **Metrics per public API call.** The `bearerAuth` middleware populates `req.platformAuth` with `{ appId, clientId, userId, workspaceId, scopes, tokenId }`. This data is available to an audit logger middleware. The `logAuditEvent` function (used in `apps/routes.ts`) records to the `audit_log` table. A dedicated audit middleware for every `/api/v1` route is not yet wired — noted as a gap.
 
-**Agent audit trail (planned).** After Epic 7, the agent's calls through `/api/v1` will produce audit log rows with `app: 'fleet-graph-agent'`. A grep of the audit log or a portal panel can confirm the agent went through the public API.
+**Agent audit trail (planned, not yet implemented).** Once the agent rewire is built, the agent's calls through `/api/v1` would produce audit log rows tagged with the agent's OAuth app client_id. A grep of the audit log or a portal panel would then confirm the agent went through the public API. None of this exists on master today.
 
 **Idempotency-Key in delivery log.** Every delivery row stores `idempotency_key`. The portal delivery log view shows this field. A subscriber that deduplicates correctly will process a replayed delivery with the same key exactly once — visible by comparing the key between the original and replay row.

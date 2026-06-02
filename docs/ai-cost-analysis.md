@@ -31,14 +31,14 @@ LLM cost is attributable to the agent app's user-driven sessions, not the platfo
 
 ## Development and Testing Costs
 
-**CI minutes for the TTFE drill.** The Time-to-First-Event drill runs end-to-end on every PR. The drill starts a local Ship server (already running in CI), runs `pnpm install @ship/sdk`, executes device login, creates a document, and waits for a verified webhook. Measured at approximately 45–60 seconds per CI run. At ~10 PRs/day during active development, that is ~10 minutes of CI compute/day dedicated to the drill. At GitHub Actions pricing ($0.008/minute for ubuntu-latest), this is <$0.10/day — budgeted at $2/week.
+**CI minutes for the TTFE drill.** The Time-to-First-Event drill is run via `pnpm drill:ttfe` (root script, which delegates to `pnpm --filter @ship/cli drill ttfe`). The drill starts a local Ship server, performs the `ship login` device flow, creates a document through the SDK, and waits for a verified signed webhook. Measured at approximately 45–60 seconds per run locally. **CI wiring is planned but not yet in place** — no job runs the drill automatically on every PR today. When wired, at ~10 PRs/day that would be ~10 minutes of CI compute/day; at GitHub Actions pricing ($0.008/minute for ubuntu-latest), <$0.10/day — budget ~$2/week.
 
 **OAuth Playwright tests.** The auth-code + PKCE flow test (`api/src/platform/oauth/__tests__/token-endpoint.test.ts`) runs in-process with supertest — no real browser launch. A full Playwright browser-driven test for the consent UI would add ~20 seconds per run; that test is not yet included in the CI suite.
 
 **OpenAPI spec generation and validation overhead.** The `openapi-fitness.test.ts` suite calls `getV1OpenApiDocument()` once and runs all assertions synchronously. Measured at ~200 ms per vitest run. Negligible.
 
-**Delivery-log storage during demo.** The TTFE drill creates 1 event → 1 delivery per run. At 100 CI runs (demo week), that is 100 rows ≈ 50 KB. The grader app seeded by migration 041 creates 1 subscription, so fan-out is always 1. Total storage for demo volume: unmeasurably small.
+**Delivery-log storage during demo.** The TTFE drill creates 1 event → 1 delivery per run. At ~100 drill runs (demo week), that is 100 rows ≈ 50 KB. The drill registers a single webhook subscription at runtime, so fan-out is always 1. Total storage for demo volume: unmeasurably small.
 
-**LLM spend during Epic 7 agent rewire (planned).** The rewire replaces direct domain service calls with SDK calls. It should not change token volume — agent prompts and responses are identical. Recommended: record `usage.input_tokens + usage.output_tokens` from the Anthropic SDK before and after the flag flip on the same 10-turn test session. A >5% change is a signal that the rewire inadvertently changed prompt context.
+**LLM spend during Epic 7 agent rewire (planned, not yet implemented).** The planned rewire replaces direct domain service calls with SDK calls. It should not change token volume — agent prompts and responses are identical. Recommended when built: record `usage.input_tokens + usage.output_tokens` from the Anthropic SDK before and after the planned feature-flag flip on the same 10-turn test session. A >5% change is a signal that the rewire inadvertently changed prompt context.
 
 **SDK install footprint.** The SDK (`sdk/`) has zero production npm dependencies (uses `node:crypto` and native fetch). Measured bundle size: ~18 KB minified + gzipped — well under the 250 KB PRD budget. Enforced by the package.json `dependencies` field (empty).
