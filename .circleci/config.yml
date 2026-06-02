@@ -165,6 +165,25 @@ jobs:
           name: SDK install-size budget (<250 KB gzipped, zero runtime deps)
           command: node scripts/check-sdk-bundle-size.mjs
 
+  openapi_breaking:
+    # Contract gate: regenerate the /api/v1 OpenAPI spec and diff it against
+    # origin/master using oasdiff.  Fails the build if any breaking change is
+    # detected, enforcing the Plugforge versioning policy (additive-only within
+    # /v1; breaking changes must go to /v2).
+    #
+    # oasdiff is a Go binary fetched at runtime — no npm dependency added.
+    # If origin/master has no docs/openapi.json yet (first-ever spec), the
+    # script skips the diff and exits 0 (no-baseline pass).
+    docker:
+      - image: cimg/node:20.18
+        environment:
+          BASE_BRANCH: master
+    steps:
+      - setup_node
+      - run:
+          name: OpenAPI breaking-change gate (oasdiff vs origin/master)
+          command: bash scripts/openapi-breaking-check.sh
+
   deploy_railway:
     parameters:
       railway_environment:
@@ -202,11 +221,13 @@ workflows:
           requires: [install_build]
       - perf_regression:
           requires: [install_build]
+      - openapi_breaking:
+          requires: [install_build]
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
           railway_token_env: RAILWAY_TOKEN_DEV
-          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill, perf_regression]
+          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill, perf_regression, openapi_breaking]
           filters:
             branches:
               only: master

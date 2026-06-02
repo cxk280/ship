@@ -5,6 +5,15 @@
 import type { Http } from '../http.js';
 import type { ShipDocument, Page, ListDocumentsParams, CreateDocumentInput } from '../types.js';
 
+export interface CreateDocumentOptions {
+  /**
+   * Stripe-grade idempotency: pass a unique client-generated key to guarantee
+   * exactly-once semantics. Retrying the same request with the same key returns
+   * the original response without creating a duplicate document.
+   */
+  idempotencyKey?: string;
+}
+
 export class DocumentsClient {
   constructor(private readonly http: Http) {}
 
@@ -19,8 +28,10 @@ export class DocumentsClient {
     return this.http.request<ShipDocument>('GET', `/documents/${encodeURIComponent(id)}`);
   }
 
-  create(input: CreateDocumentInput): Promise<ShipDocument> {
-    return this.http.request<ShipDocument>('POST', '/documents', { body: input });
+  create(input: CreateDocumentInput, opts: CreateDocumentOptions = {}): Promise<ShipDocument> {
+    const headers: Record<string, string> = {};
+    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+    return this.http.request<ShipDocument>('POST', '/documents', { body: input, headers });
   }
 
   /**

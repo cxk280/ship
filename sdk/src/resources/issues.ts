@@ -5,6 +5,15 @@
 import type { Http } from '../http.js';
 import type { ShipIssue, Page, ListIssuesParams, CreateIssueInput } from '../types.js';
 
+export interface CreateIssueOptions {
+  /**
+   * Stripe-grade idempotency: pass a unique client-generated key to guarantee
+   * exactly-once semantics. Retrying the same request with the same key returns
+   * the original response without creating a duplicate issue.
+   */
+  idempotencyKey?: string;
+}
+
 export class IssuesClient {
   constructor(private readonly http: Http) {}
 
@@ -25,8 +34,10 @@ export class IssuesClient {
     return this.http.request<ShipIssue>('GET', `/issues/${encodeURIComponent(id)}`);
   }
 
-  create(input: CreateIssueInput): Promise<ShipIssue> {
-    return this.http.request<ShipIssue>('POST', '/issues', { body: input });
+  create(input: CreateIssueInput, opts: CreateIssueOptions = {}): Promise<ShipIssue> {
+    const headers: Record<string, string> = {};
+    if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+    return this.http.request<ShipIssue>('POST', '/issues', { body: input, headers });
   }
 
   /**
