@@ -82,6 +82,7 @@
     "@types/ws": "^8.5.13",
     "@vitest/coverage-v8": "4.0.17",
     "@vitest/ui": "^4.0.16",
+    "fast-check": "^4.8.0",
     "openapi3-ts": "^4.5.0",
     "supertest": "^7.1.4",
     "tsx": "^4.19.2",
