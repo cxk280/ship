@@ -533,4 +533,97 @@ export const api = {
         method: 'DELETE',
       }),
   },
+
+  /** Developer Portal — OAuth app + webhook management (session-authed). */
+  developerPortal: {
+    // ---- OAuth Apps ----
+    listApps: () =>
+      request<OAuthApp[]>('/api/oauth/apps'),
+
+    createApp: (data: CreateAppInput) =>
+      request<OAuthAppCreateResponse>('/api/oauth/apps', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    rotateSecret: (appId: string) =>
+      request<RotateSecretResponse>(`/api/oauth/apps/${appId}/rotate-secret`, {
+        method: 'POST',
+      }),
+
+    deleteApp: (appId: string) =>
+      request('/api/oauth/apps/' + appId, {
+        method: 'DELETE',
+      }),
+
+    // ---- Webhooks (portal read + replay) ----
+    listSubscriptions: (appId: string) =>
+      request<WebhookSubscription[]>(`/api/oauth/portal/apps/${appId}/subscriptions`),
+
+    listDeliveries: (appId: string, limit = 50) =>
+      request<WebhookDelivery[]>(`/api/oauth/portal/apps/${appId}/deliveries?limit=${limit}`),
+
+    replayDelivery: (deliveryId: string) =>
+      request<WebhookDelivery>(`/api/oauth/portal/deliveries/${deliveryId}/replay`, {
+        method: 'POST',
+      }),
+  },
 };
+
+// ---- Developer Portal types ----
+
+export interface OAuthApp {
+  id: string;
+  client_id: string;
+  name: string;
+  description: string | null;
+  redirect_uris: string[];
+  requested_scopes: string[];
+  app_type: 'confidential' | 'public' | 'first_party';
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface OAuthAppCreateResponse extends OAuthApp {
+  client_secret: string;
+  warning: string;
+}
+
+export interface RotateSecretResponse {
+  client_id: string;
+  client_secret: string;
+  warning: string;
+}
+
+export interface CreateAppInput {
+  name: string;
+  description?: string;
+  redirect_uris?: string[];
+  requested_scopes?: string[];
+  app_type?: 'confidential' | 'public' | 'first_party';
+}
+
+export interface WebhookSubscription {
+  id: string;
+  app_id: string;
+  event_type: string;
+  target_url: string;
+  active: boolean;
+  created_at: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  subscription_id: string;
+  event_id: string;
+  event_type: string;
+  attempt_number: number;
+  status: 'pending' | 'delivered' | 'dead';
+  response_status: number | null;
+  response_excerpt: string | null;
+  latency_ms: number | null;
+  idempotency_key: string;
+  next_attempt_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+}
