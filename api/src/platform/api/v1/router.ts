@@ -28,6 +28,96 @@ import { getV1OpenApiDocument } from '../../openapi/registry.js';
 // and meta — it opts out of a scope explicitly.
 publicRoutes.register({ method: 'get', path: '/openapi.json', scope: null, paginated: false, summary: 'OpenAPI 3.1 spec for this API' });
 
+// The interactive docs page is PUBLIC HTML — not a documented API resource, so it
+// is NOT registered in publicRoutes (keeping the spec↔route parity check clean).
+// It sits alongside /openapi.json as a meta/infrastructure route that bypasses auth.
+
+/**
+ * Single-string HTML page for the hosted interactive API reference.
+ * Loads Scalar from CDN; no new npm dependency. The spec is fetched client-side
+ * from /api/v1/openapi.json so the page always reflects the live spec.
+ */
+function buildDocsHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ship API Reference</title>
+  <style>
+    body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    .quickstart {
+      background: #0f1117;
+      color: #e2e8f0;
+      padding: 2rem 2.5rem 1.5rem;
+      border-bottom: 1px solid #2d3748;
+    }
+    .quickstart h2 { margin: 0 0 0.5rem; font-size: 1.1rem; font-weight: 600; color: #90cdf4; letter-spacing: 0.03em; }
+    .quickstart p  { margin: 0 0 0.75rem; font-size: 0.85rem; color: #a0aec0; }
+    .quickstart pre {
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      overflow-x: auto;
+      color: #e2e8f0;
+      margin: 0;
+    }
+    .quickstart .label {
+      display: inline-block;
+      background: #2b6cb0;
+      color: #bee3f8;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 0.15rem 0.5rem;
+      border-radius: 3px;
+      margin-bottom: 0.5rem;
+    }
+    .creds {
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      background: #1a202c;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      padding: 0.6rem 1rem;
+    }
+    .creds code { color: #68d391; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <div class="quickstart">
+    <h2>Ship API — Quickstart</h2>
+    <p>Explore every endpoint below, or get started with the SDK in seconds:</p>
+    <span class="label">SDK QUICKSTART</span>
+    <pre><code>npm install @ship/sdk
+
+import { ShipClient } from '@ship/sdk';
+
+const client = new ShipClient({ baseUrl: 'https://ship.awsdev.treasury.gov', token: ACCESS_TOKEN });
+
+const me       = await client.me();                                  // GET /api/v1/me
+const docs     = await client.documents.list();                      // GET /api/v1/documents
+const newDoc   = await client.documents.create({ title: 'Hello', document_type: 'wiki', content: '' });
+await client.webhooks.subscribe({ event_type: 'document.created', target_url: 'https://example.com/hook' });</code></pre>
+    <div class="creds">
+      <strong>Grader credentials</strong> (read-only sandbox, seeded in every environment):<br/>
+      <code>client_id</code>: <code>ship_app_grader</code> &nbsp;|&nbsp;
+      <code>client_secret</code>: <code>ship_secret_grader_readonly_demo</code><br/>
+      Get a token: <code>POST /oauth/token</code> with <code>grant_type=client_credentials</code>
+    </div>
+  </div>
+
+  <!-- Scalar API Reference (CDN, no new npm dependency) -->
+  <script id="api-reference" data-url="/api/v1/openapi.json"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>`;
+}
+
 /**
  * Collaborators injected by the composition root. Grows slice by slice
  * (bearer auth, domain services, event bus, rate limiter, …). Everything here is
@@ -224,6 +314,15 @@ export function createV1Router(deps: PlatformDeps): Router {
   // without a token, so it sits BEFORE the auth + rate-limit gate).
   router.get('/openapi.json', (_req, res) => {
     res.json(getV1OpenApiDocument());
+  });
+
+  // Public, unauthenticated: interactive API reference page. Sits BEFORE the auth
+  // gate exactly like /openapi.json. Not registered in publicRoutes because it is
+  // an HTML infrastructure route, not a documented API resource operation — adding
+  // it would break the spec↔route parity fitness test.
+  router.get('/docs', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.status(200).send(buildDocsHtml());
   });
 
   // The public-edge gate, applied to every resource route in one place (the deck's

@@ -21,7 +21,7 @@
 
 ## Plugforge — the Ship public API platform
 
-Ship exposes a versioned, OAuth-2.0-secured public API (`/api/v1`) with signed webhooks and a typed SDK (`@ship/sdk`). The live spec is at `/api/v1/openapi.json` (static copy: [`docs/openapi.json`](./docs/openapi.json)).
+Ship exposes a versioned, OAuth-2.0-secured public API (`/api/v1`) with signed webhooks and a typed SDK (`@ship/sdk`). The live spec is at `/api/v1/openapi.json` (static copy: [`docs/openapi.json`](./docs/openapi.json)). Interactive API reference (try-it UI): [`/api/v1/docs`](/api/v1/docs).
 
 **Pre-registered read-only app for graders** (read-only sandbox; seeded in every environment via migration `041`):
 
