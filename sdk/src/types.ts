@@ -42,3 +42,59 @@ export interface CreateDocumentInput {
   content?: unknown;
   properties?: Record<string, unknown>;
 }
+
+// ---- Issues -----------------------------------------------------------------
+
+export type IssueState = 'triage' | 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'done' | 'cancelled';
+export type IssuePriority = 'urgent' | 'high' | 'medium' | 'low' | 'none';
+
+export interface ShipIssue {
+  id: string;
+  title: string;
+  state: IssueState;
+  priority: IssuePriority;
+  assignee_id: string | null;
+  due_date: string | null;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListIssuesParams {
+  limit?: number;
+  cursor?: string;
+  state?: IssueState;
+  priority?: IssuePriority;
+  assignee_id?: string;
+}
+
+export interface CreateIssueInput {
+  title?: string;
+  state?: IssueState;
+  priority?: IssuePriority;
+  assignee_id?: string | null;
+  due_date?: string | null;
+  properties?: Record<string, unknown>;
+}
+
+// ---- Sprints ----------------------------------------------------------------
+
+export type SprintStatus = 'planned' | 'active' | 'completed';
+
+export interface ShipSprint {
+  id: string;
+  title: string;
+  status: SprintStatus;
+  sprint_number: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListSprintsParams {
+  limit?: number;
+  cursor?: string;
+  status?: SprintStatus;
+}

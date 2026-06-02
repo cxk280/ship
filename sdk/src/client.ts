@@ -4,6 +4,8 @@
  */
 import { Http } from './http.js';
 import { DocumentsClient } from './resources/documents.js';
+import { IssuesClient } from './resources/issues.js';
+import { SprintsClient } from './resources/sprints.js';
 import { WebhooksClient } from './resources/webhooks.js';
 import { InMemoryTokenStore, type ITokenStore } from './token-store.js';
 import { runDeviceLogin, type DeviceLoginOptions } from './auth/device.js';
@@ -24,6 +26,8 @@ export interface ShipClientOptions {
 export class ShipClient {
   private readonly http: Http;
   readonly documents: DocumentsClient;
+  readonly issues: IssuesClient;
+  readonly sprints: SprintsClient;
   readonly webhooks: WebhooksClient;
 
   constructor(opts: ShipClientOptions = {}) {
@@ -31,6 +35,8 @@ export class ShipClient {
     const tokenStore = opts.tokenStore ?? new InMemoryTokenStore(opts.token ? { access_token: opts.token } : undefined);
     this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret });
     this.documents = new DocumentsClient(this.http);
+    this.issues = new IssuesClient(this.http);
+    this.sprints = new SprintsClient(this.http);
     this.webhooks = new WebhooksClient(this.http);
   }
 

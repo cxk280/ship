@@ -11,6 +11,8 @@ import { hashClientSecret, sha256, generate } from '../../../oauth/crypto.js';
 import { bearerAuth } from '../../../oauth/bearer.js';
 import { identityAdapter } from '../../../adapters/identity.js';
 import { createDocumentsAdapter } from '../../../adapters/documents.js';
+import { createIssuesAdapter } from '../../../adapters/issues.js';
+import { createSprintsAdapter } from '../../../adapters/sprints.js';
 import { createWebhooksAdapter } from '../../../adapters/webhooks.js';
 import { systemClock } from '../../../webhooks/clock.js';
 import { QueueWebhookDeliverer, type Transport } from '../../../webhooks/deliverer.js';
@@ -30,7 +32,7 @@ function v1App() {
   const a = express();
   a.use('/api/v1', createV1Router({
     bearerAuth, rateLimit: noRateLimit, identity: identityAdapter,
-    documents: createDocumentsAdapter(bus), webhooks: createWebhooksAdapter(bus),
+    documents: createDocumentsAdapter(bus), issues: createIssuesAdapter(bus), sprints: createSprintsAdapter(), webhooks: createWebhooksAdapter(bus),
   }));
   return a;
 }

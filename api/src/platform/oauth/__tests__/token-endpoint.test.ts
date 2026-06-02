@@ -15,9 +15,13 @@ import { createV1Router } from '../../api/v1/router.js';
 import { bearerAuth } from '../bearer.js';
 import { identityAdapter } from '../../adapters/identity.js';
 import { createDocumentsAdapter } from '../../adapters/documents.js';
+import { createIssuesAdapter } from '../../adapters/issues.js';
+import { createSprintsAdapter } from '../../adapters/sprints.js';
 import { stubWebhooks, noopBus } from '../../webhooks/__tests__/test-doubles.js';
 
 const documentsAdapter = createDocumentsAdapter(noopBus);
+const issuesAdapter = createIssuesAdapter(noopBus);
+const sprintsAdapter = createSprintsAdapter();
 
 const SECRET = 'ship_secret_http_known';
 let workspaceId: string;
@@ -31,7 +35,7 @@ function testApp() {
   a.use(express.json());
   a.use(express.urlencoded({ extended: true }));
   a.use('/oauth', createOAuthRouter());
-  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, webhooks: stubWebhooks }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks }));
   return a;
 }
 
