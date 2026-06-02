@@ -139,6 +139,33 @@ export interface PublicDelivery {
   created_at: string;
 }
 
+/**
+ * One recorded API call — stored via AuditPort.record() in the request path.
+ * All nullable because auth may not be established when an error occurs.
+ */
+export interface ApiCallAudit {
+  requestId: string;
+  method: string;
+  route: string;
+  status: number;
+  latencyMs: number;
+  scope: string | null;
+  appId: string | null;
+  clientId: string | null;
+  userId: string | null;
+  workspaceId: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/**
+ * Fire-and-forget audit port. `record()` MUST NOT throw into the request path —
+ * implementations swallow or log errors internally.
+ */
+export interface AuditPort {
+  record(entry: ApiCallAudit): void;
+}
+
 /** Webhook subscription management + delivery log (implemented by an adapter). */
 export interface WebhooksPort {
   /** Allowed event types (for validation + the consent/portal UI). */

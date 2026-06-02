@@ -33,6 +33,7 @@ function v1App() {
   a.use('/api/v1', createV1Router({
     bearerAuth, rateLimit: noRateLimit, identity: identityAdapter,
     documents: createDocumentsAdapter(bus), issues: createIssuesAdapter(bus), sprints: createSprintsAdapter(), webhooks: createWebhooksAdapter(bus),
+    audit: { record() { /* no-op */ } },
   }));
   return a;
 }

@@ -3,17 +3,18 @@
  *
  * This is a BRAND-NEW router that shares NO request-handling middleware with the
  * internal `/api/*` API (no session auth, no conditional CSRF, no internal rate
- * limiter). Its pipeline is: request-id → bearer auth → [resource routes, each
- * declaring a scope] → 404 → public error handler.
+ * limiter). Its pipeline is: request-id → audit → json parser → bearer auth →
+ * rate-limit → [resource routes, each declaring a scope] → 404 → public error
+ * handler.
  *
  * Boundary rule (enforced by scripts/check-api-boundary.mjs): files under
  * platform/api/v1/** must NOT import from api/src outside platform/. Concrete
  * collaborators (domain services, bearer auth) arrive via injected `deps`, wired
  * in the composition root (platform/composition.ts → app.ts).
  */
-import { Router, json, type RequestHandler } from 'express';
+import { Router, json, type RequestHandler, type Request, type Response, type NextFunction } from 'express';
 import { requestIdMiddleware, publicNotFoundHandler, apiErrorHandler } from '../../errors.js';
-import type { IdentityPort, DocumentsPort, IssuesPort, SprintsPort, WebhooksPort } from './ports.js';
+import type { IdentityPort, DocumentsPort, IssuesPort, SprintsPort, WebhooksPort, AuditPort } from './ports.js';
 import { createMeRouter } from './me.js';
 import { createDocumentsRouter } from './documents.js';
 import { createIssuesRouter } from './issues.js';
@@ -49,6 +50,53 @@ export interface PlatformDeps {
   sprints: SprintsPort;
   /** Webhook subscription management + delivery log + replay. */
   webhooks: WebhooksPort;
+  /** Per-call audit trail — fire-and-forget, must not throw. */
+  audit: AuditPort;
+}
+
+/**
+ * Build the audit middleware. Runs immediately after request-id so every public
+ * request installs the finish listener, including malformed bodies and auth
+ * failures. Authenticated requests populate req.platformAuth later in the
+ * pipeline; unauthenticated failures are recorded with null app/user fields.
+ */
+function createAuditMiddleware(audit: AuditPort): RequestHandler {
+  return function auditMiddleware(req: Request, res: Response, next: NextFunction): void {
+    const startMs = Date.now();
+    res.on('finish', () => {
+      try {
+        const auth = req.platformAuth;
+        // Determine the route template. Express sets req.route.path on the
+        // matched route; combined with req.baseUrl it gives e.g. /documents/:id.
+        // Fall back to req.path for middleware-level 404s.
+        const routeTemplate = req.route?.path
+          ? `${req.baseUrl}${req.route.path}`.replace(/\/api\/v1/, '') || req.route.path
+          : req.path;
+
+        // The requireScope middleware stashes the declared scope on req so we
+        // can report exactly which scope the matched route required.
+        const scope = (req as Request & { requiredScope?: string }).requiredScope ?? null;
+
+        audit.record({
+          requestId: req.requestId ?? '',
+          method: req.method,
+          route: routeTemplate,
+          status: res.statusCode,
+          latencyMs: Date.now() - startMs,
+          scope,
+          appId: auth?.appId ?? null,
+          clientId: auth?.clientId ?? null,
+          userId: auth?.userId ?? null,
+          workspaceId: auth?.workspaceId ?? null,
+          ip: req.ip ?? null,
+          userAgent: req.get('user-agent') ?? null,
+        });
+      } catch {
+        // Audit must never leak into the request path.
+      }
+    });
+    next();
+  };
 }
 
 export function createV1Router(deps: PlatformDeps): Router {
@@ -57,6 +105,10 @@ export function createV1Router(deps: PlatformDeps): Router {
   // Every public request gets a request id (echoed as X-Request-Id, used by the
   // error middleware and audit trail).
   router.use(requestIdMiddleware);
+
+  // Install audit before parsing/auth so malformed bodies and authentication
+  // failures still produce a public API call audit row.
+  router.use(createAuditMiddleware(deps.audit));
 
   // The public edge owns its OWN body parsing — so a malformed body throws
   // INSIDE this router (after the request id is set) and is caught by the v1
@@ -76,6 +128,7 @@ export function createV1Router(deps: PlatformDeps): Router {
   // here (not per-route) is why a route can't accidentally ship unauthenticated
   // or unthrottled.
   router.use(deps.bearerAuth);
+
   router.use(deps.rateLimit);
 
   // Resource routers. Each route declares its scope via requireScope(...); /me is
