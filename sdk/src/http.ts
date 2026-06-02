@@ -11,6 +11,7 @@
  */
 import { ShipError, type ApiErrorBody } from './errors.js';
 import type { ITokenStore } from './token-store.js';
+import { createDpopProof, type DpopKeyPair } from './auth/dpop.js';
 
 export interface HttpConfig {
   /** Server origin, e.g. https://ship.example.com (no trailing slash). */
@@ -24,6 +25,12 @@ export interface HttpConfig {
    * Default: 3. Set to 0 to disable retries entirely.
    */
   maxRetries?: number;
+  /**
+   * RFC 9449 DPoP: when set, requests use `Authorization: DPoP <token>` plus a
+   * per-request signed `DPoP` proof header bound to this key. The token store
+   * must hold a DPoP-bound token (token_type "DPoP" from the token endpoint).
+   */
+  dpop?: DpopKeyPair;
 }
 
 /** Request-level options accepted by `Http.request`. */
@@ -108,7 +115,17 @@ export class Http {
 
     const stored = await this.cfg.tokenStore.get();
     const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
-    if (stored?.access_token) headers.Authorization = `Bearer ${stored.access_token}`;
+    if (stored?.access_token) {
+      if (this.cfg.dpop) {
+        // Sender-constrained: DPoP scheme + a fresh proof bound to method+url+token.
+        headers.Authorization = `DPoP ${stored.access_token}`;
+        headers.DPoP = createDpopProof(this.cfg.dpop, method, url.toString(), {
+          accessToken: stored.access_token,
+        });
+      } else {
+        headers.Authorization = `Bearer ${stored.access_token}`;
+      }
+    }
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 
     let res: Response;

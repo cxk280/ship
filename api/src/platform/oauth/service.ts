@@ -32,11 +32,24 @@ export const TTL = {
 
 export interface TokenResponse {
   access_token: string;
-  token_type: 'Bearer';
+  /** "DPoP" when the access token is sender-constrained (RFC 9449), else "Bearer". */
+  token_type: 'Bearer' | 'DPoP';
   expires_in: number;
   refresh_token?: string;
   scope: string;
 }
+
+/**
+ * Optional DPoP binding for a token request (RFC 9449). When supplied, the issued
+ * access token is sender-constrained to this JWK thumbprint and the response
+ * token_type is "DPoP". The refresh token is NOT bound (it's redeemed at the
+ * client-authenticated token endpoint, not the resource server).
+ */
+export interface DpopBinding {
+  jkt: string;
+}
+
+const tokenTypeFor = (binding?: DpopBinding): 'Bearer' | 'DPoP' => (binding ? 'DPoP' : 'Bearer');
 
 /** Validate requested scopes: each must be registered AND allowed for the app. */
 export function resolveScopes(app: OAuthAppRow, requested: string[] | undefined): string[] {
@@ -85,6 +98,7 @@ async function mintTokens(input: {
   grantType: 'authorization_code' | 'refresh_token' | 'client_credentials' | 'device_code';
   withRefresh: boolean;
   familyId?: string;
+  dpop?: DpopBinding;
 }): Promise<TokenResponse> {
   const accessRaw = generate.accessToken();
   await store.insertAccessToken({
@@ -95,6 +109,7 @@ async function mintTokens(input: {
     scopes: input.scopes,
     grantType: input.grantType,
     expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+    dpopJkt: input.dpop?.jkt ?? null,
   });
 
   let refreshRaw: string | undefined;
@@ -113,7 +128,7 @@ async function mintTokens(input: {
 
   return {
     access_token: accessRaw,
-    token_type: 'Bearer',
+    token_type: tokenTypeFor(input.dpop),
     expires_in: TTL.accessSec,
     ...(refreshRaw ? { refresh_token: refreshRaw } : {}),
     scope: input.scopes.join(' '),
@@ -153,6 +168,7 @@ export async function exchangeAuthorizationCode(input: {
   code: string;
   redirectUri: string;
   codeVerifier: string | undefined;
+  dpop?: DpopBinding;
 }): Promise<TokenResponse> {
   const row = await store.getAuthCodeByHash(sha256(input.code));
   if (!row) throw new OAuthError('invalid_grant', 'Invalid authorization code');
@@ -179,6 +195,7 @@ export async function exchangeAuthorizationCode(input: {
       scopes: row.scopes,
       grantType: 'authorization_code',
       expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+      dpopJkt: input.dpop?.jkt ?? null,
     },
     refreshToken: {
       tokenHash: sha256(refreshRaw),
@@ -194,7 +211,7 @@ export async function exchangeAuthorizationCode(input: {
 
   return {
     access_token: accessRaw,
-    token_type: 'Bearer',
+    token_type: tokenTypeFor(input.dpop),
     expires_in: TTL.accessSec,
     refresh_token: refreshRaw,
     scope: row.scopes.join(' '),
@@ -208,6 +225,7 @@ export async function refresh(input: {
   app: OAuthAppRow;
   refreshToken: string;
   requestedScopes?: string[];
+  dpop?: DpopBinding;
 }): Promise<TokenResponse> {
   const row = await store.getRefreshTokenByHash(sha256(input.refreshToken));
   if (!row) throw new OAuthError('invalid_grant', 'Invalid refresh token');
@@ -246,6 +264,7 @@ export async function refresh(input: {
       scopes,
       grantType: 'refresh_token',
       expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+      dpopJkt: input.dpop?.jkt ?? null,
     },
     refreshToken: {
       tokenHash: sha256(refreshRaw),
@@ -264,7 +283,7 @@ export async function refresh(input: {
 
   return {
     access_token: accessRaw,
-    token_type: 'Bearer',
+    token_type: tokenTypeFor(input.dpop),
     expires_in: TTL.accessSec,
     refresh_token: refreshRaw,
     scope: scopes.join(' '),
@@ -277,6 +296,7 @@ export async function refresh(input: {
 export async function clientCredentials(input: {
   app: OAuthAppRow;
   requestedScopes?: string[];
+  dpop?: DpopBinding;
 }): Promise<TokenResponse> {
   if (input.app.app_type === 'public') {
     throw new OAuthError('unauthorized_client', 'Public clients cannot use client_credentials');
@@ -289,6 +309,7 @@ export async function clientCredentials(input: {
     scopes,
     grantType: 'client_credentials',
     withRefresh: false,
+    dpop: input.dpop,
   });
 }
 
@@ -335,6 +356,7 @@ export async function startDeviceAuthorization(input: {
 export async function pollDeviceToken(input: {
   app: OAuthAppRow;
   deviceCode: string;
+  dpop?: DpopBinding;
 }): Promise<TokenResponse> {
   const row = await store.getDeviceByHash(sha256(input.deviceCode));
   if (!row || row.app_id !== input.app.id) throw new OAuthError('invalid_grant', 'Unknown device_code');
@@ -369,6 +391,7 @@ export async function pollDeviceToken(input: {
       scopes: row.scopes,
       grantType: 'device_code',
       expiresAt: new Date(Date.now() + TTL.accessSec * 1000),
+      dpopJkt: input.dpop?.jkt ?? null,
     },
     refreshToken: {
       tokenHash: sha256(refreshRaw),
@@ -384,9 +407,82 @@ export async function pollDeviceToken(input: {
 
   return {
     access_token: accessRaw,
-    token_type: 'Bearer',
+    token_type: tokenTypeFor(input.dpop),
     expires_in: TTL.accessSec,
     refresh_token: refreshRaw,
     scope: row.scopes.join(' '),
   };
+}
+
+// ---- token introspection (RFC 7662) ---------------------------------------
+
+/**
+ * RFC 7662 introspection response. `active` is always present; every other
+ * member is omitted for an inactive token so we never leak WHY it's inactive.
+ */
+export interface IntrospectionResponse {
+  active: boolean;
+  scope?: string;
+  client_id?: string;
+  token_type?: 'Bearer' | 'DPoP';
+  exp?: number;
+  iat?: number;
+  sub?: string;
+  aud?: string;
+  /** RFC 9449 confirmation claim for a DPoP-bound token. */
+  cnf?: { jkt: string };
+}
+
+const INACTIVE: IntrospectionResponse = { active: false };
+
+const toEpoch = (ts: string | null | undefined): number | undefined =>
+  ts ? Math.floor(new Date(ts).getTime() / 1000) : undefined;
+
+/**
+ * Introspect a token presented at /oauth/introspect. The CALLER must have
+ * already authenticated the requesting client. We look the token up by its
+ * sha256 hash (same as everywhere else), trying the access-token table first and
+ * falling back to refresh tokens. Any expired / revoked / consumed / unknown
+ * token — or one whose app is deactivated — returns `{ active: false }` with no
+ * detail, per RFC 7662 §2.2.
+ */
+export async function introspect(token: string): Promise<IntrospectionResponse> {
+  if (!token || typeof token !== 'string') return INACTIVE;
+  const hash = sha256(token);
+
+  const at = await store.getAccessTokenForIntrospection(hash);
+  if (at) {
+    const expired = new Date(at.expires_at).getTime() < Date.now();
+    if (at.revoked_at || expired || !at.app_is_active) return INACTIVE;
+    const resp: IntrospectionResponse = {
+      active: true,
+      scope: at.scopes.join(' '),
+      client_id: at.client_id,
+      token_type: at.dpop_jkt ? 'DPoP' : 'Bearer',
+      exp: toEpoch(at.expires_at),
+      iat: toEpoch(at.created_at),
+      ...(at.user_id ? { sub: at.user_id } : {}),
+      ...(at.workspace_id ? { aud: at.workspace_id } : {}),
+      ...(at.dpop_jkt ? { cnf: { jkt: at.dpop_jkt } } : {}),
+    };
+    return resp;
+  }
+
+  const rt = await store.getRefreshTokenForIntrospection(hash);
+  if (rt) {
+    const expired = new Date(rt.expires_at).getTime() < Date.now();
+    if (rt.revoked_at || rt.consumed_at || expired || !rt.app_is_active) return INACTIVE;
+    return {
+      active: true,
+      scope: rt.scopes.join(' '),
+      client_id: rt.client_id,
+      token_type: 'Bearer',
+      exp: toEpoch(rt.expires_at),
+      iat: toEpoch(rt.created_at),
+      sub: rt.user_id,
+      ...(rt.workspace_id ? { aud: rt.workspace_id } : {}),
+    };
+  }
+
+  return INACTIVE;
 }

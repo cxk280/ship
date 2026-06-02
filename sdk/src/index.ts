@@ -34,6 +34,13 @@ export {
 } from './auth/authcode.js';
 export { generatePkce, randomState, type Pkce } from './auth/pkce.js';
 export {
+  generateDpopKeyPair,
+  createDpopProof,
+  dpopThumbprint,
+  type DpopKeyPair,
+  type CreateDpopProofOptions,
+} from './auth/dpop.js';
+export {
   verifyWebhook,
   verifyWebhookEd25519,
   computeSignature,

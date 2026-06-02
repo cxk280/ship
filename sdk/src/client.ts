@@ -10,6 +10,7 @@ import { WebhooksClient } from './resources/webhooks.js';
 import { InMemoryTokenStore, type ITokenStore } from './token-store.js';
 import { runDeviceLogin, type DeviceLoginOptions } from './auth/device.js';
 import { runAuthorizationCodeFlow, type AuthorizationCodeFlowOptions } from './auth/authcode.js';
+import type { DpopKeyPair } from './auth/dpop.js';
 import type { MeResponse } from './types.js';
 
 export interface ShipClientOptions {
@@ -27,6 +28,13 @@ export interface ShipClientOptions {
    * Default: 3. Set to 0 to disable retries.
    */
   maxRetries?: number;
+  /**
+   * RFC 9449 DPoP keypair. When set, the client sends `Authorization: DPoP
+   * <token>` plus a per-request signed proof. Use with a token obtained via a
+   * DPoP-bound token request (token_type "DPoP"). Generate one with
+   * {@link generateDpopKeyPair}.
+   */
+  dpop?: DpopKeyPair;
 }
 
 export class ShipClient {
@@ -39,7 +47,7 @@ export class ShipClient {
   constructor(opts: ShipClientOptions = {}) {
     const origin = (opts.baseUrl ?? 'http://localhost:3000').replace(/\/$/, '');
     const tokenStore = opts.tokenStore ?? new InMemoryTokenStore(opts.token ? { access_token: opts.token } : undefined);
-    this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret, maxRetries: opts.maxRetries });
+    this.http = new Http({ origin, tokenStore, clientId: opts.clientId, clientSecret: opts.clientSecret, maxRetries: opts.maxRetries, dpop: opts.dpop });
     this.documents = new DocumentsClient(this.http);
     this.issues = new IssuesClient(this.http);
     this.sprints = new SprintsClient(this.http);
