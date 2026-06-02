@@ -7,18 +7,37 @@
  *   ship docs get <id>                            # fetch a document
  *   ship docs create --title "hello"              # create a document (via the SDK)
  *   ship webhooks tail                            # stream signed deliveries to stdout
+ *     [--public-url <url>] [--port <n>]           # advertise a tunnel URL when Ship is remote
  *   ship listen --forward-to <url>               # local webhook tunnel (à la stripe listen)
  *     [--events <comma-list>]                     # default: document.created,document.updated,
  *                                                 #          issue.created,issue.assigned
+ *     [--public-url <url>] [--port <n>]           # advertise a tunnel URL when Ship is remote
+ *
+ * Pointing the CLI at a REMOTE/deployed Ship? The platform can't reach a 127.0.0.1
+ * listener, so run a tunnel (e.g. `ngrok http 8787`) and pass its public https URL:
+ *   SHIP_BASE_URL=https://…  SHIP_PUBLIC_URL=https://ab12.ngrok.app  SHIP_LISTEN_PORT=8787 ship webhooks tail
+ * (equivalently `--public-url https://ab12.ngrok.app --port 8787`).
  */
 import { ShipClient, verifyWebhook, type CreatedSubscription } from '@ship/sdk';
-import { BASE_URL, CLIENT_ID, SCOPES, tokenStore, client, credentialsPath } from './config.js';
+import { BASE_URL, CLIENT_ID, SCOPES, PUBLIC_URL, LISTEN_PORT, tokenStore, client, credentialsPath } from './config.js';
 import { startListener } from './webhook-listener.js';
 import { verifyAndForward } from './forwarder.js';
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+/**
+ * Resolve the local listener's tunnel options from CLI flags (highest priority) then env
+ * (SHIP_PUBLIC_URL / SHIP_LISTEN_PORT). Lets `webhooks tail`/`listen` work against a remote
+ * Ship by advertising a public callback URL while still binding the server locally.
+ */
+function listenerOpts(args: string[]): { publicUrl?: string; port?: number } {
+  const publicUrl = flag(args, 'public-url') ?? PUBLIC_URL;
+  const portStr = flag(args, 'port');
+  const port = portStr !== undefined ? Number(portStr) : LISTEN_PORT;
+  return { publicUrl, port };
 }
 
 async function login(): Promise<void> {
@@ -53,11 +72,12 @@ async function docs(sub: string | undefined, args: string[]): Promise<void> {
   }
 }
 
-async function webhooksTail(): Promise<void> {
+async function webhooksTail(args: string[]): Promise<void> {
   const c = client();
-  const listener = await startListener();
+  const listener = await startListener(listenerOpts(args));
   const sub = await c.webhooks.create({ event: 'document.created', target_url: listener.url });
   console.log(`✓ Subscribed to document.created → ${listener.url}`);
+  if (listener.url !== listener.localUrl) console.log(`  (tunnel → ${listener.localUrl})`);
   console.log('  Streaming signed deliveries (Ctrl+C to stop)…\n');
 
   listener.onDelivery((d) => {
@@ -114,10 +134,10 @@ async function listen(args: string[]): Promise<void> {
     : DEFAULT_LISTEN_EVENTS;
 
   const c = client();
-  const listener = await startListener();
+  const listener = await startListener(listenerOpts(args));
 
   console.log(`\n  Ship webhook tunnel`);
-  console.log(`  Local listener: ${listener.url}`);
+  console.log(`  Listener:       ${listener.url}${listener.url !== listener.localUrl ? `  (tunnel → ${listener.localUrl})` : ''}`);
   console.log(`  Forwarding to:  ${forwardTo}`);
   console.log(`  Events:         ${events.join(', ')}`);
   console.log(`\n  Ready! Waiting for webhook deliveries… (Ctrl+C to stop)\n`);
@@ -197,8 +217,8 @@ async function main(): Promise<void> {
     case 'docs':
       return docs(sub, rest);
     case 'webhooks':
-      if (sub === 'tail') return webhooksTail();
-      console.error('usage: ship webhooks tail');
+      if (sub === 'tail') return webhooksTail(rest);
+      console.error('usage: ship webhooks tail [--public-url <url>] [--port <n>]');
       process.exitCode = 1;
       return;
     case 'listen':
@@ -209,8 +229,11 @@ async function main(): Promise<void> {
         'Ship CLI — usage:\n' +
         '  ship login\n' +
         '  ship docs ls|get <id>|create --title "..."\n' +
-        '  ship webhooks tail\n' +
-        '  ship listen --forward-to <url> [--events <comma-list>]',
+        '  ship webhooks tail [--public-url <url>] [--port <n>]\n' +
+        '  ship listen --forward-to <url> [--events <comma-list>] [--public-url <url>] [--port <n>]\n' +
+        '\n' +
+        'Against a remote/deployed Ship, run a tunnel (e.g. `ngrok http 8787`) and set\n' +
+        'SHIP_PUBLIC_URL + SHIP_LISTEN_PORT (or --public-url/--port) so deliveries reach you.',
       );
   }
 }
