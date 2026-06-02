@@ -167,11 +167,13 @@ workflows:
           requires: [install_build]
       - eval_llm:
           requires: [install_build]
+      - ttfe_drill:
+          requires: [install_build]
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
           railway_token_env: RAILWAY_TOKEN_DEV
-          requires: [install_build, eval_deterministic, test_integration, eval_llm]
+          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill]
           filters:
             branches:
               only: master
