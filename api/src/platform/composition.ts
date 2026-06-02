@@ -18,6 +18,7 @@ import { createDocumentsAdapter } from './adapters/documents.js';
 import { createIssuesAdapter } from './adapters/issues.js';
 import { createSprintsAdapter } from './adapters/sprints.js';
 import { createWebhooksAdapter } from './adapters/webhooks.js';
+import { createAuditAdapter } from './adapters/audit.js';
 import { InMemoryTokenBucketLimiter } from './ratelimit/limiter.js';
 import { createRateLimitMiddleware } from './ratelimit/middleware.js';
 import { systemClock } from './webhooks/clock.js';
@@ -69,6 +70,7 @@ export function buildPlatform(): Platform {
     issues: createIssuesAdapter(eventBus),
     sprints: createSprintsAdapter(),
     webhooks: createWebhooksAdapter(eventBus),
+    audit: createAuditAdapter(),
   };
   const v1Router = createV1Router(deps);
   return { v1Router };

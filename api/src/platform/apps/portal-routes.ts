@@ -1,5 +1,5 @@
 /**
- * Developer Portal — session-authed read/replay surface for webhook data.
+ * Developer Portal — session-authed read/replay surface for webhook data + audit trail.
  *
  * Mounted at /api/oauth/portal.  This is platform GLUE (not under api/src/platform/api/v1)
  * so it may freely import the webhook store, event-bus, and internal middleware.
@@ -7,6 +7,7 @@
  * Endpoints (all require a valid session cookie + conditionalCsrf in app.ts):
  *   GET  /api/oauth/portal/apps/:appId/subscriptions  — list webhook subscriptions for an app
  *   GET  /api/oauth/portal/apps/:appId/deliveries      — delivery log for an app (last 50)
+ *   GET  /api/oauth/portal/apps/:appId/audit           — API call audit log for an app (last 50)
  *   POST /api/oauth/portal/deliveries/:deliveryId/replay — replay a delivery
  */
 import { Router, type Request, type Response } from 'express';
@@ -14,6 +15,7 @@ import { ERROR_CODES, HTTP_STATUS } from '@ship/shared';
 import { authMiddleware } from '../../middleware/auth.js';
 import { getAppById } from '../oauth/store.js';
 import { listSubscriptions, listDeliveries, getDelivery, getSubscription } from '../webhooks/store.js';
+import { pool } from '../../db/client.js';
 
 type RouterT = ReturnType<typeof Router>;
 
@@ -57,6 +59,25 @@ export function createPortalRouter(): RouterT {
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const deliveries = await listDeliveries(app.id, app.workspace_id, limit);
     res.json({ success: true, data: deliveries });
+  });
+
+  // GET /api/oauth/portal/apps/:appId/audit?limit=50
+  // Returns API-call audit rows for an owned app, newest first.
+  router.get('/apps/:appId/audit', async (req: Request, res: Response): Promise<void> => {
+    const app = await resolveOwnedApp(req, res, String(req.params.appId));
+    if (!app) return;
+
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const result = await pool.query(
+      `SELECT id, workspace_id, actor_user_id, action, resource_type, details, ip_address, user_agent, created_at
+       FROM audit_logs
+       WHERE action = 'api.v1.call'
+         AND details->>'app_id' = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [app.id, limit],
+    );
+    res.json({ success: true, data: result.rows });
   });
 
   // POST /api/oauth/portal/deliveries/:deliveryId/replay

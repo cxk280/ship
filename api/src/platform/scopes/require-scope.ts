@@ -19,6 +19,11 @@ export function requireScope(scope: string) {
   }
 
   return function requireScopeMiddleware(req: Request, _res: Response, next: NextFunction): void {
+    // Stash the declared scope on the request so the audit middleware can read
+    // which scope this route required — without coupling the audit layer to the
+    // route-meta registry directly.
+    (req as Request & { requiredScope?: string }).requiredScope = scope;
+
     const auth = req.platformAuth;
     if (!auth) {
       // Defensive: bearer auth must run before requireScope. Treat as unauthenticated.

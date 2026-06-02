@@ -23,6 +23,7 @@ const stubDeps: PlatformDeps = {
     eventTypes: () => [], createSubscription: vi.fn(), listSubscriptions: vi.fn(),
     deactivateSubscription: vi.fn(), listDeliveries: vi.fn(), replay: vi.fn(),
   },
+  audit: { record: vi.fn() },
 };
 
 function app() {
