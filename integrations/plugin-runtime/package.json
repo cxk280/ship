@@ -1,0 +1,22 @@
+{
+  "name": "@ship/plugin-runtime",
+  "version": "0.1.0",
+  "description": "EXPERIMENTAL: isolated plugin runtime for Ship hooks (node:vm sandbox with CPU/memory cap).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.0.16"
+  }
+}

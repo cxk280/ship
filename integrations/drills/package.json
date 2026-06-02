@@ -1,0 +1,23 @@
+{
+  "name": "@ship/drills",
+  "version": "0.1.0",
+  "description": "Ship security/protocol drills: refresh-token rotation + idempotency-key dedup.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "drill:refresh-rotation": "tsx src/drill-refresh-rotation.ts",
+    "drill:idempotency": "tsx src/drill-idempotency.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@ship/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
