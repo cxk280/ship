@@ -25,6 +25,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.3",
+    "fast-check": "^4.8.0",
     "typescript": "^5.7.2",
     "vitest": "^4.0.16"
   }
