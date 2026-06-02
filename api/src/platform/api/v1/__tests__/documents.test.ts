@@ -14,7 +14,7 @@ import { bearerAuth } from '../../../oauth/bearer.js';
 import { identityAdapter } from '../../../adapters/identity.js';
 import { createDocumentsAdapter } from '../../../adapters/documents.js';
 import { createV1Router } from '../router.js';
-import { stubWebhooks, stubIssues, stubSprints, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
+import { stubWebhooks, stubIssues, stubSprints, stubAudit, noopBus } from '../../../webhooks/__tests__/test-doubles.js';
 
 let workspaceId: string;
 let userId: string;
@@ -27,7 +27,7 @@ const documentsAdapter = createDocumentsAdapter(noopBus);
 function v1App() {
   const a = express();
   a.use(express.json());
-  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: stubIssues, sprints: stubSprints, webhooks: stubWebhooks }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: stubIssues, sprints: stubSprints, webhooks: stubWebhooks, audit: stubAudit }));
   return a;
 }
 

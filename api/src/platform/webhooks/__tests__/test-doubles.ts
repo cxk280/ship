@@ -3,7 +3,7 @@
  * doubles for every interface"). Not a test file (no `.test.ts`), just helpers.
  */
 import type { IEventBus } from '../event-bus.js';
-import type { WebhooksPort, PublicSubscription, IssuesPort, SprintsPort } from '../../api/v1/ports.js';
+import type { WebhooksPort, PublicSubscription, IssuesPort, SprintsPort, AuditPort } from '../../api/v1/ports.js';
 
 /** No-op event bus — swallows publishes (delivery is tested separately). */
 export const noopBus: IEventBus = {
@@ -43,6 +43,13 @@ export const stubIssues: IssuesPort = {
 export const stubSprints: SprintsPort = {
   async list() { return { data: [], next_cursor: null }; },
   async get() { return null; },
+};
+
+/** No-op AuditPort — swallows record() calls (audit is tested separately). */
+export const stubAudit: AuditPort = {
+  record() {
+    /* no-op */
+  },
 };
 
 /** Inert WebhooksPort for tests that don't exercise webhooks. */
