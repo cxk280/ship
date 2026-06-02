@@ -35,9 +35,11 @@ export {
 export { generatePkce, randomState, type Pkce } from './auth/pkce.js';
 export {
   verifyWebhook,
+  verifyWebhookEd25519,
   computeSignature,
   parseSignatureHeader,
   SHIP_SIGNATURE_HEADER,
+  SHIP_SIGNATURE_ED25519_HEADER,
 } from './webhooks/verify.js';
 export {
   parseWebhookEvent,

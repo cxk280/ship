@@ -37,9 +37,11 @@ The **TTFE** badge above tracks the signature Time-to-First-Event drill — clea
 | `client_secret` | `ship_secret_grader_readonly_demo` |
 | scopes | `documents:read`, `issues:read`, `sprints:read` |
 
-Get a token and read documents in two calls (replace `$BASE` with the deployed URL):
+Get a token and read documents in two calls. The block below is runnable as-is against the live dev deployment; point `BASE` at any other environment to target it:
 
 ```bash
+BASE=${BASE:-https://shipshape-app-dev.up.railway.app}   # live dev; override for staging/prod
+
 TOKEN=$(curl -s -X POST "$BASE/oauth/token" \
   -d grant_type=client_credentials \
   -d client_id=ship_app_grader \

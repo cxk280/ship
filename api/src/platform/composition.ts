@@ -25,6 +25,7 @@ import { createRateLimitMiddleware } from './ratelimit/middleware.js';
 import { systemClock } from './webhooks/clock.js';
 import { QueueWebhookDeliverer, fetchTransport } from './webhooks/deliverer.js';
 import { InMemoryEventBus } from './webhooks/event-bus.js';
+import { getOrCreateActiveKey } from './webhooks/signing-keys.js';
 
 // Import './types.js' for its side-effecting Express.Request augmentation
 // (requestId, platformAuth) so every consumer sees the public-edge fields.
@@ -61,7 +62,18 @@ export function buildPlatform(): Platform {
     transport: fetchTransport(),
     jitter: relaxed ? () => 0 : () => Math.floor(Math.random() * 1000),
   });
-  const eventBus = new InMemoryEventBus({ deliverer, clock: systemClock });
+  const eventBus = new InMemoryEventBus({
+    deliverer,
+    clock: systemClock,
+    ed25519KeyResolver: async (appId) => {
+      try {
+        const key = await getOrCreateActiveKey(appId);
+        return key.private_key;
+      } catch {
+        return undefined;
+      }
+    },
+  });
 
   const deps: PlatformDeps = {
     bearerAuth,
