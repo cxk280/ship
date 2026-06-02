@@ -20,8 +20,21 @@ export interface IEventBus {
   publish(event: DomainEvent): Promise<void>;
 }
 
+/**
+ * Resolver that returns the current active Ed25519 private key PEM for an app,
+ * or undefined if none is available. Injected so tests can use a no-op stub.
+ */
+export type Ed25519KeyResolver = (appId: string) => Promise<string | undefined>;
+
 export class InMemoryEventBus implements IEventBus {
-  constructor(private readonly deps: { deliverer: IWebhookDeliverer; clock: Clock }) {}
+  constructor(
+    private readonly deps: {
+      deliverer: IWebhookDeliverer;
+      clock: Clock;
+      /** Optional: resolves the active Ed25519 private key for an app. */
+      ed25519KeyResolver?: Ed25519KeyResolver;
+    },
+  ) {}
 
   async publish(event: DomainEvent): Promise<void> {
     // Validate against the event's registered schema (closed, typed set).
@@ -50,11 +63,15 @@ export class InMemoryEventBus implements IEventBus {
         eventType: event.type,
         idempotencyKey,
       });
+      const ed25519PrivateKeyPem = this.deps.ed25519KeyResolver
+        ? await this.deps.ed25519KeyResolver(sub.app_id)
+        : undefined;
       this.deps.deliverer.enqueue({
         deliveryId: delivery.id,
         subscription: { id: sub.id, targetUrl: sub.target_url, signingSecret: sub.signing_secret },
         envelope,
         idempotencyKey,
+        ed25519PrivateKeyPem,
       });
     }
   }
@@ -82,11 +99,15 @@ export class InMemoryEventBus implements IEventBus {
       created: Math.floor(this.deps.clock.now() / 1000),
       data: event.payload as Record<string, unknown>,
     };
+    const ed25519PrivateKeyPem = this.deps.ed25519KeyResolver
+      ? await this.deps.ed25519KeyResolver(sub.app_id)
+      : undefined;
     this.deps.deliverer.enqueue({
       deliveryId: fresh.id,
       subscription: { id: sub.id, targetUrl: sub.target_url, signingSecret: sub.signing_secret },
       envelope,
       idempotencyKey: old.idempotency_key,
+      ed25519PrivateKeyPem,
     });
     return fresh;
   }

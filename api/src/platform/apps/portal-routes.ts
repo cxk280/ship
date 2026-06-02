@@ -8,6 +8,7 @@
  *   GET  /api/oauth/portal/apps/:appId/subscriptions  — list webhook subscriptions for an app
  *   GET  /api/oauth/portal/apps/:appId/deliveries      — delivery log for an app (last 50)
  *   GET  /api/oauth/portal/apps/:appId/audit           — API call audit log for an app (last 50)
+ *   GET  /api/oauth/portal/apps/:appId/signing-keys    — Ed25519 public key(s) for an app (active + retiring)
  *   POST /api/oauth/portal/deliveries/:deliveryId/replay — replay a delivery
  */
 import { Router, type Request, type Response } from 'express';
@@ -15,6 +16,7 @@ import { ERROR_CODES, HTTP_STATUS } from '@ship/shared';
 import { authMiddleware } from '../../middleware/auth.js';
 import { getAppById } from '../oauth/store.js';
 import { listSubscriptions, listDeliveries, getDelivery, getSubscription } from '../webhooks/store.js';
+import { getPublicKeys } from '../webhooks/signing-keys.js';
 import { pool } from '../../db/client.js';
 
 type RouterT = ReturnType<typeof Router>;
@@ -80,6 +82,16 @@ export function createPortalRouter(): RouterT {
     res.json({ success: true, data: result.rows });
   });
 
+  // GET /api/oauth/portal/apps/:appId/signing-keys
+  // Returns active + retiring Ed25519 PUBLIC keys for the app (never private keys).
+  router.get('/apps/:appId/signing-keys', async (req: Request, res: Response): Promise<void> => {
+    const app = await resolveOwnedApp(req, res, String(req.params.appId));
+    if (!app) return;
+
+    const keys = await getPublicKeys(app.id);
+    res.json({ success: true, data: keys });
+  });
+
   // POST /api/oauth/portal/deliveries/:deliveryId/replay
   router.post('/deliveries/:deliveryId/replay', async (req: Request, res: Response): Promise<void> => {
     // Fetch the delivery then verify the caller owns the app it belongs to.
@@ -137,6 +149,7 @@ export function createPortalRouter(): RouterT {
 import { InMemoryEventBus } from '../webhooks/event-bus.js';
 import { QueueWebhookDeliverer, fetchTransport } from '../webhooks/deliverer.js';
 import { systemClock } from '../webhooks/clock.js';
+import { getOrCreateActiveKey } from '../webhooks/signing-keys.js';
 
 let _portalBus: InMemoryEventBus | null = null;
 
@@ -148,7 +161,18 @@ export function getPortalEventBus(): InMemoryEventBus {
       transport: fetchTransport(),
       jitter: isTest ? () => 0 : () => Math.floor(Math.random() * 1000),
     });
-    _portalBus = new InMemoryEventBus({ deliverer, clock: systemClock });
+    _portalBus = new InMemoryEventBus({
+      deliverer,
+      clock: systemClock,
+      ed25519KeyResolver: async (appId) => {
+        try {
+          const key = await getOrCreateActiveKey(appId);
+          return key.private_key;
+        } catch {
+          return undefined;
+        }
+      },
+    });
   }
   return _portalBus;
 }
