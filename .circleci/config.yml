@@ -29,8 +29,8 @@ commands:
           paths:
             - ~/.local/share/pnpm/store
       - run:
-          name: Build shared types (needed by api at runtime via @ship/shared)
-          command: pnpm build:shared
+          name: Build shared + sdk (api resolves @ship/shared and @ship/sdk at runtime/test)
+          command: pnpm build:shared && pnpm --filter @ship/sdk build
 
 jobs:
   install_build:
