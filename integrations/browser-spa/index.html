@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ship – PKCE Demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 3rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 1.5rem; }
+    #status { color: #555; margin-bottom: 1rem; }
+    #login-btn { padding: .5rem 1.25rem; font-size: 1rem; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li { padding: .5rem 0; border-bottom: 1px solid #eee; }
+    li span.type { font-size: .75rem; color: #888; margin-left: .5rem; }
+    .error { color: #c00; }
+  </style>
+</head>
+<body>
+  <h1>Ship Documents — PKCE Demo</h1>
+  <p id="status">Loading…</p>
+  <button id="login-btn" style="display:none">Sign in with Ship</button>
+  <ul id="docs-list"></ul>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

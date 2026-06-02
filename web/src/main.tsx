@@ -46,6 +46,7 @@ const OrgChartPage = React.lazy(() => import('@/pages/OrgChartPage').then((mod) 
 const InviteAcceptPage = React.lazy(() => import('@/pages/InviteAccept').then((mod) => ({ default: mod.InviteAcceptPage })));
 const SetupPage = React.lazy(() => import('@/pages/Setup').then((mod) => ({ default: mod.SetupPage })));
 const SecurityProbePage = React.lazy(() => import('@/pages/SecurityProbe').then((mod) => ({ default: mod.SecurityProbePage })));
+const DeveloperPortalPage = React.lazy(() => import('@/pages/DeveloperPortal').then((mod) => ({ default: mod.DeveloperPortalPage })));
 
 /**
  * Redirect component for type-specific routes to canonical /documents/:id
@@ -259,6 +260,7 @@ function AppRoutes() {
         <Route path="feedback/:id" element={<FeedbackEditorPage />} />
         <Route path="settings" element={<WorkspaceSettingsPage />} />
         <Route path="settings/conversions" element={<ConvertedDocumentsPage />} />
+        <Route path="developer" element={<DeveloperPortalPage />} />
       </Route>
     </Routes>
   );
