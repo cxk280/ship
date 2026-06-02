@@ -568,6 +568,11 @@ export const api = {
         method: 'POST',
       }),
 
+    sendTestEvent: (appId: string, subId: string) =>
+      request<WebhookDelivery>(`/api/oauth/portal/apps/${appId}/subscriptions/${subId}/test`, {
+        method: 'POST',
+      }),
+
     listAuditCalls: (appId: string, limit = 50) =>
       request<AuditCallRow[]>(`/api/oauth/portal/apps/${appId}/audit?limit=${limit}`),
   },
@@ -613,6 +618,9 @@ export interface WebhookSubscription {
   target_url: string;
   active: boolean;
   created_at: string;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_failure_at: string | null;
 }
 
 export interface WebhookDelivery {

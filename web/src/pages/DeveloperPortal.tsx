@@ -534,6 +534,7 @@ function WebhooksTab({ apps }: { apps: OAuthApp[] }) {
   const [subscriptions, setSubscriptions] = useState<WebhookSubscription[]>([]);
   const [deliveries, setDeliveries] = useState<WebhookDelivery[]>([]);
   const [loadingWebhooks, setLoadingWebhooks] = useState(false);
+  const [testEventResult, setTestEventResult] = useState<{ subId: string; status: number | null; error?: string } | null>(null);
 
   useEffect(() => {
     if (!selectedAppId) return;
@@ -554,8 +555,19 @@ function WebhooksTab({ apps }: { apps: OAuthApp[] }) {
   async function handleReplay(deliveryId: string) {
     const res = await api.developerPortal.replayDelivery(deliveryId);
     if (res.success) {
-      // Refresh delivery log
       if (selectedAppId) loadWebhookData(selectedAppId);
+    }
+  }
+
+  async function handleSendTestEvent(subId: string) {
+    setTestEventResult(null);
+    const res = await api.developerPortal.sendTestEvent(selectedAppId, subId);
+    if (res.success && res.data) {
+      setTestEventResult({ subId, status: res.data.response_status });
+      // Refresh to show the new test delivery in the log.
+      if (selectedAppId) loadWebhookData(selectedAppId);
+    } else {
+      setTestEventResult({ subId, status: null, error: res.error?.message ?? 'Failed' });
     }
   }
 
@@ -585,6 +597,29 @@ function WebhooksTab({ apps }: { apps: OAuthApp[] }) {
         </select>
       </div>
 
+      {/* Test event result banner */}
+      {testEventResult && (
+        <div className={cn(
+          'p-3 rounded-md border text-sm flex items-center justify-between',
+          testEventResult.error
+            ? 'bg-red-500/10 border-red-500/30 text-red-500'
+            : testEventResult.status != null && testEventResult.status >= 200 && testEventResult.status < 300
+              ? 'bg-green-500/10 border-green-500/30 text-green-500'
+              : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-600',
+        )}>
+          <span>
+            {testEventResult.error
+              ? `Test event failed: ${testEventResult.error}`
+              : testEventResult.status != null
+                ? `Test event sent — endpoint responded with HTTP ${testEventResult.status}`
+                : 'Test event enqueued (delivery pending)'}
+          </span>
+          <button onClick={() => setTestEventResult(null)} className="text-xs opacity-70 hover:opacity-100 ml-4">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {loadingWebhooks ? (
         <div className="text-muted text-sm">Loading...</div>
       ) : (
@@ -608,28 +643,18 @@ function WebhooksTab({ apps }: { apps: OAuthApp[] }) {
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted">Event Type</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted">Target URL</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted">Health</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted">Created</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-muted">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {subscriptions.map((sub) => (
-                      <tr key={sub.id}>
-                        <td className="px-4 py-3 text-sm font-mono text-foreground">{sub.event_type}</td>
-                        <td className="px-4 py-3 text-sm text-muted font-mono truncate max-w-xs">{sub.target_url}</td>
-                        <td className="px-4 py-3 text-sm">
-                          <span className={cn(
-                            'text-xs px-1.5 py-0.5 rounded-full',
-                            sub.active
-                              ? 'bg-green-500/10 text-green-500'
-                              : 'bg-red-500/10 text-red-500',
-                          )}>
-                            {sub.active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-muted">
-                          {new Date(sub.created_at).toLocaleDateString()}
-                        </td>
-                      </tr>
+                      <SubscriptionRow
+                        key={sub.id}
+                        sub={sub}
+                        onSendTestEvent={() => handleSendTestEvent(sub.id)}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -668,6 +693,81 @@ function WebhooksTab({ apps }: { apps: OAuthApp[] }) {
         </>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subscription row — shows health (consecutive failures / auto-disabled badge)
+// and a "Send test event" button.
+// ---------------------------------------------------------------------------
+function SubscriptionRow({
+  sub,
+  onSendTestEvent,
+}: {
+  sub: WebhookSubscription;
+  onSendTestEvent: () => Promise<void>;
+}) {
+  const [sending, setSending] = useState(false);
+
+  async function handleTest() {
+    setSending(true);
+    await onSendTestEvent();
+    setSending(false);
+  }
+
+  const isAutoDisabled = !sub.active && sub.disabled_reason?.startsWith('auto-disabled');
+
+  return (
+    <tr>
+      <td className="px-4 py-3 text-sm font-mono text-foreground">{sub.event_type}</td>
+      <td className="px-4 py-3 text-sm text-muted font-mono truncate max-w-xs">{sub.target_url}</td>
+      <td className="px-4 py-3 text-sm">
+        <div className="flex flex-col gap-1">
+          <span className={cn(
+            'text-xs px-1.5 py-0.5 rounded-full w-fit',
+            sub.active
+              ? 'bg-green-500/10 text-green-500'
+              : 'bg-red-500/10 text-red-500',
+          )}>
+            {sub.active ? 'Active' : 'Inactive'}
+          </span>
+          {isAutoDisabled && (
+            <span className="text-xs px-1.5 py-0.5 rounded-full bg-orange-500/10 text-orange-500 w-fit">
+              Auto-disabled
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-3 text-sm">
+        {sub.consecutive_failures > 0 ? (
+          <span className={cn(
+            'text-xs font-mono',
+            sub.consecutive_failures >= 10 ? 'text-red-500' : 'text-yellow-600',
+          )}>
+            {sub.consecutive_failures} failure{sub.consecutive_failures !== 1 ? 's' : ''}
+          </span>
+        ) : (
+          <span className="text-xs text-green-500">Healthy</span>
+        )}
+        {sub.disabled_reason && !isAutoDisabled && (
+          <p className="text-xs text-muted mt-0.5 truncate max-w-[180px]" title={sub.disabled_reason}>
+            {sub.disabled_reason}
+          </p>
+        )}
+      </td>
+      <td className="px-4 py-3 text-sm text-muted">
+        {new Date(sub.created_at).toLocaleDateString()}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <button
+          onClick={handleTest}
+          disabled={sending}
+          className="text-xs text-accent hover:text-accent/80 disabled:opacity-50 transition-colors"
+        >
+          {sending ? 'Sending...' : 'Send test event'}
+        </button>
+      </td>
+    </tr>
   );
 }
 
