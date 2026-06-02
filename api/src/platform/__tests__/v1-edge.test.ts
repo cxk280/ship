@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { createV1Router, type PlatformDeps } from '../api/v1/router.js';
+import { ApiError } from '../errors.js';
 
 const stubDeps: PlatformDeps = {
   // Edge-contract tests only exercise unmatched routes, so the stub deps are
@@ -52,6 +53,38 @@ describe('/api/v1 edge', () => {
     const res = await request(app()).get('/api/v1/nope').set('X-Request-Id', 'trace-abc');
     expect(res.headers['x-request-id']).toBe('trace-abc');
     expect(res.body.request_id).toBe('trace-abc');
+  });
+
+  it('audits a request rejected by bearer auth before app context exists', async () => {
+    const record = vi.fn();
+    const deps: PlatformDeps = {
+      ...stubDeps,
+      bearerAuth: (_req, res, next) => {
+        res.setHeader('WWW-Authenticate', 'Bearer');
+        next(ApiError.unauthorized('Missing bearer token', { reason: 'token_missing' }));
+      },
+      audit: { record },
+    };
+    const a = express();
+    a.use('/api/v1', createV1Router(deps));
+
+    const res = await request(a)
+      .get('/api/v1/documents')
+      .set('X-Request-Id', 'trace-no-token');
+
+    expect(res.status).toBe(401);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'trace-no-token',
+      method: 'GET',
+      route: '/documents',
+      status: 401,
+      scope: null,
+      appId: null,
+      clientId: null,
+      userId: null,
+      workspaceId: null,
+    }));
   });
 
   it('a malformed JSON body still ships the ApiError shape (not Express HTML)', async () => {
