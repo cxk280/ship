@@ -30,7 +30,13 @@ export class Http {
   async request<T>(
     method: string,
     path: string,
-    opts: { query?: Record<string, string | number | undefined>; body?: unknown; _retried?: boolean } = {},
+    opts: {
+      query?: Record<string, string | number | undefined>;
+      body?: unknown;
+      /** Extra headers to merge into this request (e.g. Idempotency-Key). */
+      headers?: Record<string, string>;
+      _retried?: boolean;
+    } = {},
   ): Promise<T> {
     const url = new URL(`${this.apiBase}${path}`);
     for (const [k, v] of Object.entries(opts.query ?? {})) {
@@ -38,7 +44,7 @@ export class Http {
     }
 
     const stored = await this.cfg.tokenStore.get();
-    const headers: Record<string, string> = { Accept: 'application/json' };
+    const headers: Record<string, string> = { Accept: 'application/json', ...opts.headers };
     if (stored?.access_token) headers.Authorization = `Bearer ${stored.access_token}`;
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 

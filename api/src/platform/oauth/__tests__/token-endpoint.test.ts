@@ -17,7 +17,7 @@ import { identityAdapter } from '../../adapters/identity.js';
 import { createDocumentsAdapter } from '../../adapters/documents.js';
 import { createIssuesAdapter } from '../../adapters/issues.js';
 import { createSprintsAdapter } from '../../adapters/sprints.js';
-import { stubWebhooks, noopBus } from '../../webhooks/__tests__/test-doubles.js';
+import { stubWebhooks, stubAudit, stubIdempotency, noopBus } from '../../webhooks/__tests__/test-doubles.js';
 
 const documentsAdapter = createDocumentsAdapter(noopBus);
 const issuesAdapter = createIssuesAdapter(noopBus);
@@ -35,7 +35,7 @@ function testApp() {
   a.use(express.json());
   a.use(express.urlencoded({ extended: true }));
   a.use('/oauth', createOAuthRouter());
-  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks }));
+  a.use('/api/v1', createV1Router({ bearerAuth, rateLimit: noRateLimit, identity: identityAdapter, documents: documentsAdapter, issues: issuesAdapter, sprints: sprintsAdapter, webhooks: stubWebhooks, audit: stubAudit, idempotency: stubIdempotency }));
   return a;
 }
 

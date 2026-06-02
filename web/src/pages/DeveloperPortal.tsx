@@ -7,6 +7,7 @@ import {
   RotateSecretResponse,
   WebhookSubscription,
   WebhookDelivery,
+  AuditCallRow,
   CreateAppInput,
 } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -27,8 +28,8 @@ const AVAILABLE_SCOPES = [
 // ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
-type Tab = 'apps' | 'webhooks';
-const VALID_TABS: Tab[] = ['apps', 'webhooks'];
+type Tab = 'apps' | 'webhooks' | 'usage';
+const VALID_TABS: Tab[] = ['apps', 'webhooks', 'usage'];
 
 function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
@@ -87,6 +88,9 @@ export function DeveloperPortalPage() {
           <TabButton active={activeTab === 'webhooks'} onClick={() => handleTabChange('webhooks')}>
             Webhooks
           </TabButton>
+          <TabButton active={activeTab === 'usage'} onClick={() => handleTabChange('usage')}>
+            Usage
+          </TabButton>
         </nav>
       </div>
 
@@ -105,6 +109,7 @@ export function DeveloperPortalPage() {
               />
             )}
             {activeTab === 'webhooks' && <WebhooksTab apps={apps} />}
+            {activeTab === 'usage' && <UsageTab apps={apps} />}
           </>
         )}
       </main>
@@ -720,5 +725,113 @@ function DeliveryRow({ delivery: d, onReplay }: { delivery: WebhookDelivery; onR
         )}
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Usage Tab — API call audit trail
+// ---------------------------------------------------------------------------
+function UsageTab({ apps }: { apps: OAuthApp[] }) {
+  const [selectedAppId, setSelectedAppId] = useState<string>(apps[0]?.id ?? '');
+  const [rows, setRows] = useState<AuditCallRow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedAppId) return;
+    loadAudit(selectedAppId);
+  }, [selectedAppId]);
+
+  async function loadAudit(appId: string) {
+    setLoading(true);
+    const res = await api.developerPortal.listAuditCalls(appId);
+    if (res.success && res.data) setRows(res.data);
+    setLoading(false);
+  }
+
+  if (apps.length === 0) {
+    return (
+      <div className="text-muted text-sm">
+        No apps yet. Register an app on the OAuth Apps tab first.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* App selector */}
+      <div>
+        <label className="block text-xs text-muted mb-1">Select App</label>
+        <select
+          value={selectedAppId}
+          onChange={(e) => setSelectedAppId(e.target.value)}
+          className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+        >
+          {apps.map((app) => (
+            <option key={app.id} value={app.id}>
+              {app.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {loading ? (
+        <div className="text-muted text-sm">Loading...</div>
+      ) : (
+        <section>
+          <h2 className="text-sm font-semibold text-foreground mb-3">API Calls</h2>
+          {rows.length === 0 ? (
+            <p className="text-muted text-sm">No API calls recorded yet.</p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-border/30">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Method</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Route</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Scope</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Latency</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((row) => {
+                    const d = typeof row.details === 'string' ? JSON.parse(row.details) : row.details;
+                    const statusOk = d.status >= 200 && d.status < 300;
+                    return (
+                      <tr key={row.id}>
+                        <td className="px-4 py-3 text-xs text-muted whitespace-nowrap">
+                          {new Date(row.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-foreground">
+                          {d.method}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-muted">
+                          {d.route}
+                        </td>
+                        <td className="px-4 py-3 text-xs font-mono text-accent">
+                          {d.scope ?? <span className="text-muted/50">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-xs">
+                          <span className={cn(
+                            'font-mono',
+                            statusOk ? 'text-green-500' : 'text-red-500',
+                          )}>
+                            {d.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted">
+                          {d.latency_ms != null ? `${d.latency_ms}ms` : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+    </div>
   );
 }

@@ -567,6 +567,9 @@ export const api = {
       request<WebhookDelivery>(`/api/oauth/portal/deliveries/${deliveryId}/replay`, {
         method: 'POST',
       }),
+
+    listAuditCalls: (appId: string, limit = 50) =>
+      request<AuditCallRow[]>(`/api/oauth/portal/apps/${appId}/audit?limit=${limit}`),
   },
 };
 
@@ -625,5 +628,27 @@ export interface WebhookDelivery {
   idempotency_key: string;
   next_attempt_at: string | null;
   delivered_at: string | null;
+  created_at: string;
+}
+
+/** One row from the public-API audit log (action = 'api.v1.call'). */
+export interface AuditCallRow {
+  id: string;
+  workspace_id: string | null;
+  actor_user_id: string | null;
+  action: string;
+  resource_type: string | null;
+  details: {
+    request_id: string;
+    method: string;
+    route: string;
+    status: number;
+    latency_ms: number;
+    scope: string | null;
+    app_id: string | null;
+    client_id: string | null;
+  };
+  ip_address: string | null;
+  user_agent: string | null;
   created_at: string;
 }

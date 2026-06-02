@@ -139,6 +139,58 @@ export interface PublicDelivery {
   created_at: string;
 }
 
+/**
+ * One recorded API call — stored via AuditPort.record() in the request path.
+ * All nullable because auth may not be established when an error occurs.
+ */
+export interface ApiCallAudit {
+  requestId: string;
+  method: string;
+  route: string;
+  status: number;
+  latencyMs: number;
+  scope: string | null;
+  appId: string | null;
+  clientId: string | null;
+  userId: string | null;
+  workspaceId: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/**
+ * Fire-and-forget audit port. `record()` MUST NOT throw into the request path —
+ * implementations swallow or log errors internally.
+ */
+export interface AuditPort {
+  record(entry: ApiCallAudit): void;
+}
+
+/**
+ * Result variants returned by IdempotencyPort.begin().
+ *
+ * - `new`      — this is the first time we've seen this key; proceed normally.
+ * - `replay`   — the same key+fingerprint was already completed; replay stored response.
+ * - `conflict` — the same key is still in-flight from a concurrent request.
+ * - `mismatch` — the same key was already used with a different request payload.
+ */
+export type IdempotencyBeginResult =
+  | { kind: 'new' }
+  | { kind: 'replay'; record: { status: number; body: unknown } }
+  | { kind: 'conflict' }
+  | { kind: 'mismatch' };
+
+/**
+ * Exactly-once semantics for public POST writes.
+ *
+ * `begin` atomically claims a slot for the (appId, key) pair.
+ * `complete` records the final response so future retries can replay it.
+ */
+export interface IdempotencyPort {
+  begin(input: { appId: string; key: string; fingerprint: string }): Promise<IdempotencyBeginResult>;
+  complete(input: { appId: string; key: string; status: number; body: unknown }): Promise<void>;
+}
+
 /** Webhook subscription management + delivery log (implemented by an adapter). */
 export interface WebhooksPort {
   /** Allowed event types (for validation + the consent/portal UI). */
