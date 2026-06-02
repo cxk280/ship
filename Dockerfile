@@ -15,12 +15,19 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY api/package.json ./api/
 COPY web/package.json ./web/
 COPY shared/package.json ./shared/
+COPY sdk/package.json ./sdk/
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY . .
 
-RUN rm -rf api/dist shared/dist web/dist && pnpm build
+# Build ONLY the deployable packages (the API server + web + their shared/sdk
+# libraries). A recursive `pnpm build` would also compile integrations/* (cli,
+# slack, plugin-runtime, …), whose dev deps are NOT installed in this image, so
+# tsc fails there with "Cannot find type definition file for 'node'". Those
+# packages are reference integrations, not part of the server image.
+RUN rm -rf api/dist shared/dist web/dist sdk/dist && \
+    pnpm --recursive --filter='!./integrations/*' run build
 
 FROM base AS runtime
 
@@ -28,10 +35,12 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY api/package.json ./api/
 COPY web/package.json ./web/
 COPY shared/package.json ./shared/
+COPY sdk/package.json ./sdk/
 
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm store prune
 
 COPY --from=build /app/shared/dist ./shared/dist
+COPY --from=build /app/sdk/dist ./sdk/dist
 COPY --from=build /app/api/dist ./api/dist
 COPY --from=build /app/web/dist ./web/dist
 

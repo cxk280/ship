@@ -13,7 +13,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import dns from 'node:dns';
-import { signPayload } from './signer.js';
+import { signPayload, signPayloadEd25519, SHIP_SIGNATURE_ED25519_HEADER } from './signer.js';
 import type { Clock } from './clock.js';
 import type { WebhookEnvelope } from './events.js';
 import { updateDeliveryAttempt, recordDeliveryFailure, recordDeliverySuccess } from './store.js';
@@ -44,6 +44,8 @@ export interface DeliveryJob {
   subscription: { id: string; targetUrl: string; signingSecret: string };
   envelope: WebhookEnvelope;
   idempotencyKey: string;
+  /** Ed25519 private key PEM for the app; if present the delivery carries Ship-Signature-Ed25519 too. */
+  ed25519PrivateKeyPem?: string;
 }
 
 export interface IWebhookDeliverer {
@@ -155,14 +157,19 @@ export class QueueWebhookDeliverer implements IWebhookDeliverer {
     const tSec = Math.floor(this.deps.clock.now() / 1000);
     const sig = signPayload(job.subscription.signingSecret, body, tSec);
 
-    const result = await this.deps.transport(job.subscription.targetUrl, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Ship-Signature': sig.header,
-        'Idempotency-Key': job.idempotencyKey,
-      },
-      body,
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Ship-Signature': sig.header,
+      'Idempotency-Key': job.idempotencyKey,
+    };
+
+    // Add Ed25519 header if the app has a signing key.
+    if (job.ed25519PrivateKeyPem) {
+      const ed = signPayloadEd25519(job.ed25519PrivateKeyPem, body, tSec);
+      headers[SHIP_SIGNATURE_ED25519_HEADER] = ed.header;
+    }
+
+    const result = await this.deps.transport(job.subscription.targetUrl, { headers, body });
 
     const latency = this.deps.clock.now() - startedMs;
     const ok = result.status >= 200 && result.status < 300;

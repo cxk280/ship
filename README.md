@@ -21,7 +21,13 @@
 
 ## Plugforge — the Ship public API platform
 
+<p>
+  <a href="https://app.circleci.com/pipelines/github/cxk280/ship"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cxk280/ship/master/docs/ttfe-badge.json" alt="Time-to-First-Event"></a>
+</p>
+
 Ship exposes a versioned, OAuth-2.0-secured public API (`/api/v1`) with signed webhooks and a typed SDK (`@ship/sdk`). The live spec is at `/api/v1/openapi.json` (static copy: [`docs/openapi.json`](./docs/openapi.json)). Interactive API reference (try-it UI): [`/api/v1/docs`](/api/v1/docs).
+
+The **TTFE** badge above tracks the signature Time-to-First-Event drill — clean machine → device login → subscribe → create document → receive a verified signed webhook — measured end-to-end in CI against the 60s budget. CI refreshes [`docs/ttfe-badge.json`](./docs/ttfe-badge.json) on every `master` build from the latest measurement (see the `ttfe_drill` job in [`.circleci/config.yml`](./.circleci/config.yml)), and posts a per-step trend comment on each PR.
 
 **Pre-registered read-only app for graders** (read-only sandbox; seeded in every environment via migration `041`):
 
@@ -31,9 +37,11 @@ Ship exposes a versioned, OAuth-2.0-secured public API (`/api/v1`) with signed w
 | `client_secret` | `ship_secret_grader_readonly_demo` |
 | scopes | `documents:read`, `issues:read`, `sprints:read` |
 
-Get a token and read documents in two calls (replace `$BASE` with the deployed URL):
+Get a token and read documents in two calls. The block below is runnable as-is against the live dev deployment; point `BASE` at any other environment to target it:
 
 ```bash
+BASE=${BASE:-https://shipshape-app-dev.up.railway.app}   # live dev; override for staging/prod
+
 TOKEN=$(curl -s -X POST "$BASE/oauth/token" \
   -d grant_type=client_credentials \
   -d client_id=ship_app_grader \
