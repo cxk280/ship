@@ -34,6 +34,23 @@ export function formatEvent(event: ShipEvent): SlackMessage {
       };
     }
 
+    case 'issue.created': {
+      const title = (event.data.title as string | undefined) ?? 'Untitled';
+      const id = (event.data.id as string | undefined) ?? '?';
+      return {
+        text: `New issue created: *${title}* (\`${id}\`)`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:ticket: New issue created: *${title}*\n\`id: ${id}\``,
+            },
+          },
+        ],
+      };
+    }
+
     case 'issue.assigned': {
       const title = (event.data.title as string | undefined) ?? 'Untitled';
       const assignee = (event.data.assignee_name as string | undefined) ??

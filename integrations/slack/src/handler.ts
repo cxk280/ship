@@ -3,15 +3,39 @@
  *
  * - Reads the raw body BEFORE any JSON parsing (required for HMAC verification).
  * - Verifies the Ship-Signature header via @ship/sdk verifyWebhook.
- * - On document.created / issue.assigned: posts a formatted message to Slack.
- *   If SLACK_WEBHOOK_URL is not set, logs the message instead (runs without a
- *   real Slack workspace in CI / local dev).
+ * - On document.created / issue.created / issue.assigned: posts a formatted
+ *   message to Slack. If SLACK_WEBHOOK_URL is not set, logs the message instead
+ *   (runs without a real Slack workspace in CI / local dev).
+ *
+ * Signing secrets: each Ship webhook subscription has its OWN signing secret, so
+ * a bridge subscribed to multiple events may hold several. The handler verifies
+ * the delivery against any configured candidate secret (set via
+ * `setSigningSecrets`), falling back to the single `SHIP_WEBHOOK_SECRET` env var.
  */
 import type { Request, Response } from 'express';
 import { verifyWebhook } from '@ship/sdk';
 import { formatEvent, type ShipEvent } from './format.js';
 
-const EVENTS_TO_HANDLE = new Set(['document.created', 'issue.assigned']);
+const EVENTS_TO_HANDLE = new Set([
+  'document.created',
+  'issue.created',
+  'issue.assigned',
+]);
+
+/** Candidate signing secrets, populated by the server after ensuring subscriptions. */
+let SIGNING_SECRETS: string[] = [];
+
+/** Register the signing secrets to verify deliveries against (one per subscription). */
+export function setSigningSecrets(secrets: string[]): void {
+  SIGNING_SECRETS = secrets.filter(Boolean);
+}
+
+function candidateSecrets(): string[] {
+  const envSecret = process.env.SHIP_WEBHOOK_SECRET ?? '';
+  const all = [...SIGNING_SECRETS];
+  if (envSecret) all.push(envSecret);
+  return all;
+}
 
 /** Post a pre-formatted payload to a Slack Incoming Webhook URL. */
 async function postToSlack(url: string, payload: unknown): Promise<void> {
@@ -32,22 +56,18 @@ async function postToSlack(url: string, payload: unknown): Promise<void> {
  * so `req.body` is a `Buffer` (preserving the raw bytes for HMAC).
  */
 export async function handleShipWebhook(req: Request, res: Response): Promise<void> {
-  // Read env at request time (not module load time) so tests can set it in beforeAll.
-  const signingSecret = process.env.SHIP_WEBHOOK_SECRET ?? '';
   const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL ?? '';
 
   // req.body is a Buffer because we mount with express.raw().
   const rawBody: string =
     Buffer.isBuffer(req.body) ? req.body.toString('utf8') : String(req.body ?? '');
 
-  if (!signingSecret) {
-    console.warn('[slack] SHIP_WEBHOOK_SECRET not set — skipping signature verification');
+  const secrets = candidateSecrets();
+  if (secrets.length === 0) {
+    console.warn('[slack] no signing secret configured — skipping signature verification');
   } else {
-    const valid = verifyWebhook(
-      req.headers as Record<string, string | string[] | undefined>,
-      rawBody,
-      signingSecret,
-    );
+    const headers = req.headers as Record<string, string | string[] | undefined>;
+    const valid = secrets.some((secret) => verifyWebhook(headers, rawBody, secret));
     if (!valid) {
       res.status(400).json({ error: 'invalid_signature' });
       return;
