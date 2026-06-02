@@ -201,44 +201,38 @@ jobs:
             core.setOutput('event', event);
 
       - name: Ping Cursor to auto-fix when changes are requested
-        if: steps.submit_review.outputs.event == 'REQUEST_CHANGES'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            // Post the "@cursor fix" ping INLINE from this same run.
-            //
-            // Why not a separate pull_request_review-triggered workflow (the old
-            // codex-cursor-handoff.yml)? Codex's review is submitted with the default
-            // GITHUB_TOKEN, and GitHub intentionally does NOT trigger downstream
-            // workflows from GITHUB_TOKEN-generated events (loop prevention). So that
-            // handoff workflow could never fire, and the ping was never sent. Cursor
-            // is an EXTERNAL GitHub App, so it still receives this comment's webhook
-            // and acts on the mention — pinging inline is reliable.
-            const pr = context.payload.pull_request.number;
-            const MAX_ROUNDS = 8;
-            // Stop the loop once Cursor has already pushed MAX_ROUNDS fix commits.
-            const commits = await github.paginate(github.rest.pulls.listCommits, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr,
-            });
-            const cursorCommits = commits.filter(
-              (c) =>
-                /cursor/i.test(c.author?.login || '') ||
-                /cursor/i.test(c.commit?.author?.name || ''),
-            ).length;
-            if (cursorCommits >= MAX_ROUNDS) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr,
-                body: `⚠️ Cursor has already auto-fixed this PR ${cursorCommits} times (cap: ${MAX_ROUNDS}). Stopping the auto-fix loop — a human should review the remaining Codex findings.`,
-              });
-              return;
-            }
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr,
-              body: '@cursor fix the Codex review comments',
-            });
+        if: steps.changecheck.outputs.skip != 'true' && steps.submit_review.outputs.event == 'REQUEST_CHANGES'
+        env:
+          # Post the @cursor ping as a CONNECTED USER, not github-actions[bot].
+          # Two facts force this combination:
+          #  1) The ping must be INLINE here (not a separate pull_request_review
+          #     workflow), because Codex's review is submitted via the default
+          #     GITHUB_TOKEN and GitHub never triggers downstream workflows from
+          #     GITHUB_TOKEN events.
+          #  2) Cursor IGNORES comments authored by github-actions[bot]. So the
+          #     comment must be posted with CURSOR_TRIGGER_GITHUB_TOKEN (a PAT for
+          #     the GitHub user connected to Cursor), per AGENTS.md.
+          GH_TOKEN: ${{ secrets.CURSOR_TRIGGER_GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "⚠️ CURSOR_TRIGGER_GITHUB_TOKEN is not set — skipping the @cursor ping." >&2
+            echo "   Cursor ignores github-actions[bot] comments, so set this connected-user PAT to enable auto-fix." >&2
+            exit 0
+          fi
+
+          # Loop guard: bound how many times Cursor auto-fixes one PR.
+          MAX_ROUNDS=8
+          CURSOR_COMMITS=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --paginate \
+            --jq '[.[] | select((.author.login // "") | test("cursor"; "i"))] | length' 2>/dev/null || echo 0)
+
+          if [ "${CURSOR_COMMITS:-0}" -ge "$MAX_ROUNDS" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "⚠️ Cursor has already auto-fixed this PR ${CURSOR_COMMITS} times (cap: ${MAX_ROUNDS}). Stopping the auto-fix loop — a human should review the remaining Codex findings."
+            exit 0
+          fi
+
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "@cursor fix the Codex review comments"
