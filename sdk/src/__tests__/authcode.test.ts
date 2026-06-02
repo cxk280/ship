@@ -91,7 +91,7 @@ describe('completeAuthorizationCode', () => {
 });
 
 describe('runAuthorizationCodeFlow', () => {
-  it('runs begin → authorize → exchange and rejects a mismatched state', async () => {
+  it('runs begin → authorize → exchange and rejects missing or mismatched state', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(tokenResponse(200, { access_token: 'ship_at_2', token_type: 'Bearer', expires_in: 3600 })));
 
     // Happy path: echo the state back.
@@ -106,6 +106,16 @@ describe('runAuthorizationCodeFlow', () => {
       },
     });
     expect(ok.tokens.access_token).toBe('ship_at_2');
+
+    // CSRF guard: the redirect state is mandatory, not just best-effort.
+    await expect(
+      runAuthorizationCodeFlow({
+        origin: 'https://ship.test',
+        clientId: 'ship_app_spa',
+        redirectUri: 'http://localhost:5180/callback',
+        authorize: async () => ({ code: 'c' }),
+      }),
+    ).rejects.toMatchObject({ kind: 'auth', code: 'state_mismatch' });
 
     // CSRF guard: a wrong state must throw.
     await expect(

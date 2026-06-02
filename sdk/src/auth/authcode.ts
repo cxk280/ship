@@ -112,8 +112,8 @@ export interface AuthorizationCodeFlowOptions extends BeginAuthorizationCodeOpti
   tokenStore?: ITokenStore;
   /**
    * Drive the user agent to `authorizeUrl` and resolve with the `code` (and, if
-   * available, the `state`) returned on the redirect. The `state` is verified
-   * against the one we generated to defend against CSRF.
+   * available, the `state`) returned on the redirect. The `state` is required
+   * and verified against the one we generated to defend against CSRF.
    */
   authorize: (authorizeUrl: string) => Promise<{ code: string; state?: string }>;
 }
@@ -124,12 +124,12 @@ export async function runAuthorizationCodeFlow(
 ): Promise<AuthorizationCodeResult> {
   const { authorizeUrl, codeVerifier, state } = beginAuthorizationCode(opts);
   const result = await opts.authorize(authorizeUrl);
-  if (result.state !== undefined && result.state !== state) {
+  if (result.state !== state) {
     throw new ShipError({
       kind: 'auth',
       status: 400,
       code: 'state_mismatch',
-      message: 'OAuth state mismatch on the authorization redirect (possible CSRF)',
+      message: 'OAuth state missing or mismatched on the authorization redirect (possible CSRF)',
     });
   }
   return completeAuthorizationCode({
