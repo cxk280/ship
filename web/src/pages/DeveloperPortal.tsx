@@ -8,6 +8,8 @@ import {
   WebhookSubscription,
   WebhookDelivery,
   AuditCallRow,
+  UsageStats,
+  UsageWindow,
   CreateAppInput,
 } from '@/lib/api';
 import { cn } from '@/lib/cn';
@@ -831,20 +833,37 @@ function DeliveryRow({ delivery: d, onReplay }: { delivery: WebhookDelivery; onR
 // ---------------------------------------------------------------------------
 // Usage Tab — API call audit trail
 // ---------------------------------------------------------------------------
+const USAGE_WINDOW_OPTIONS: { value: UsageWindow; label: string }[] = [
+  { value: '1h', label: 'Last 1h' },
+  { value: '24h', label: 'Last 24h' },
+  { value: '7d', label: 'Last 7d' },
+  { value: '30d', label: 'Last 30d' },
+];
+
+function formatPercent(rate: number): string {
+  return `${(rate * 100).toFixed(rate > 0 && rate < 0.001 ? 2 : 1)}%`;
+}
+
 function UsageTab({ apps }: { apps: OAuthApp[] }) {
   const [selectedAppId, setSelectedAppId] = useState<string>(apps[0]?.id ?? '');
+  const [usageWindow, setUsageWindow] = useState<UsageWindow>('24h');
+  const [stats, setStats] = useState<UsageStats | null>(null);
   const [rows, setRows] = useState<AuditCallRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!selectedAppId) return;
-    loadAudit(selectedAppId);
-  }, [selectedAppId]);
+    loadUsage(selectedAppId, usageWindow);
+  }, [selectedAppId, usageWindow]);
 
-  async function loadAudit(appId: string) {
+  async function loadUsage(appId: string, window: UsageWindow) {
     setLoading(true);
-    const res = await api.developerPortal.listAuditCalls(appId);
-    if (res.success && res.data) setRows(res.data);
+    const [statsRes, auditRes] = await Promise.all([
+      api.developerPortal.getUsageStats(appId, window),
+      api.developerPortal.listAuditCalls(appId),
+    ]);
+    if (statsRes.success && statsRes.data) setStats(statsRes.data);
+    if (auditRes.success && auditRes.data) setRows(auditRes.data);
     setLoading(false);
   }
 
@@ -858,25 +877,98 @@ function UsageTab({ apps }: { apps: OAuthApp[] }) {
 
   return (
     <div className="space-y-6">
-      {/* App selector */}
-      <div>
-        <label className="block text-xs text-muted mb-1">Select App</label>
-        <select
-          value={selectedAppId}
-          onChange={(e) => setSelectedAppId(e.target.value)}
-          className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
-        >
-          {apps.map((app) => (
-            <option key={app.id} value={app.id}>
-              {app.name}
-            </option>
-          ))}
-        </select>
+      {/* App + window selectors */}
+      <div className="flex flex-wrap gap-4">
+        <div>
+          <label className="block text-xs text-muted mb-1">Select App</label>
+          <select
+            value={selectedAppId}
+            onChange={(e) => setSelectedAppId(e.target.value)}
+            className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+          >
+            {apps.map((app) => (
+              <option key={app.id} value={app.id}>
+                {app.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Window</label>
+          <select
+            value={usageWindow}
+            onChange={(e) => setUsageWindow(e.target.value as UsageWindow)}
+            className="px-3 py-2 bg-background border border-border rounded-md text-foreground text-sm"
+          >
+            {USAGE_WINDOW_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {loading ? (
         <div className="text-muted text-sm">Loading...</div>
       ) : (
+        <>
+        {/* Analytics summary */}
+        <section>
+          <h2 className="text-sm font-semibold text-foreground mb-3">Analytics</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="Total Calls" value={(stats?.total_calls ?? 0).toLocaleString()} />
+            <StatCard
+              label="Error Rate"
+              value={formatPercent(stats?.error_rate ?? 0)}
+              tone={(stats?.error_rate ?? 0) > 0 ? 'error' : 'ok'}
+            />
+            <StatCard
+              label="p50 Latency"
+              value={stats?.p50_ms != null ? `${stats.p50_ms}ms` : '—'}
+            />
+            <StatCard
+              label="p95 Latency"
+              value={stats?.p95_ms != null ? `${stats.p95_ms}ms` : '—'}
+            />
+          </div>
+        </section>
+
+        {/* Top routes */}
+        <section>
+          <h2 className="text-sm font-semibold text-foreground mb-3">Top Routes</h2>
+          {!stats || stats.top_routes.length === 0 ? (
+            <p className="text-muted text-sm">No API calls in this window.</p>
+          ) : (
+            <div className="border border-border rounded-lg overflow-hidden">
+              <table className="w-full">
+                <thead className="bg-border/30">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted">Route</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted">Calls</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted">Errors</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted">Error Rate</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {stats.top_routes.map((r) => (
+                    <tr key={r.route}>
+                      <td className="px-4 py-3 text-xs font-mono text-foreground">{r.route}</td>
+                      <td className="px-4 py-3 text-xs text-right text-muted">{r.calls.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-right text-muted">{r.errors.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-right">
+                        <span className={cn('font-mono', r.error_rate > 0 ? 'text-red-500' : 'text-green-500')}>
+                          {formatPercent(r.error_rate)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         <section>
           <h2 className="text-sm font-semibold text-foreground mb-3">API Calls</h2>
           {rows.length === 0 ? (
@@ -931,7 +1023,33 @@ function UsageTab({ apps }: { apps: OAuthApp[] }) {
             </div>
           )}
         </section>
+        </>
       )}
+    </div>
+  );
+}
+
+// Small metric card used in the Usage analytics summary.
+function StatCard({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'ok' | 'error';
+}) {
+  return (
+    <div className="border border-border rounded-lg p-4 bg-background">
+      <div className="text-xs text-muted mb-1">{label}</div>
+      <div
+        className={cn(
+          'text-lg font-semibold',
+          tone === 'error' ? 'text-red-500' : 'text-foreground',
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }

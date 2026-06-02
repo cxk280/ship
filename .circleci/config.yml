@@ -133,6 +133,27 @@ jobs:
       - run:
           name: Time-to-First-Event drill (login → create document → verified signed webhook)
           command: pnpm drill:ttfe
+      - store_artifacts:
+          # Persist the measured timing (ms, per-step breakdown, pass/fail) as a
+          # build artifact so the TTFE trend is browsable from the CircleCI UI.
+          path: test-results/ttfe.json
+          destination: ttfe.json
+      - run:
+          name: Post/update TTFE trend PR comment (PR builds only; degrades to print-only without a token)
+          when: always
+          command: bash scripts/ttfe-pr-comment.sh
+      - run:
+          name: Refresh README TTFE badge from the measurement (master only)
+          when: always
+          command: |
+            if [ "${CIRCLE_BRANCH:-}" = "master" ]; then
+              node scripts/ttfe-badge.mjs
+              # CI does not git-push the badge here; the committed docs/ttfe-badge.json
+              # is the source of truth. This regenerates + diffs it for visibility.
+              git --no-pager diff -- docs/ttfe-badge.json || true
+            else
+              echo "Not master — skipping badge refresh."
+            fi
 
   perf_regression:
     # PRD perf budget: per-route query counts and SDK install size must stay

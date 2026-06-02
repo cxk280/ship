@@ -13,9 +13,40 @@
  * Env: SHIP_BASE_URL, SHIP_CLIENT_ID (default ship_app_cli),
  *      SHIP_DRILL_EMAIL + SHIP_DRILL_PASSWORD (a seeded Ship user to approve as).
  */
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { ShipClient, verifyWebhook } from '@ship/sdk';
 import { BASE_URL, CLIENT_ID, SCOPES } from './config.js';
 import { startListener } from './webhook-listener.js';
+
+const THRESHOLD_MS = 60_000;
+
+/** Trend artifact consumed by CI (PR-comment trend + README badge). */
+interface TtfeArtifact {
+  ms: number;
+  threshold_ms: number;
+  passed: boolean;
+  steps: Record<string, number>;
+}
+
+/**
+ * Persist the measured timings to test-results/ttfe.json (relative to the repo
+ * root, regardless of cwd) so CI can store it as an artifact, post a PR-comment
+ * trend, and regenerate the README badge. Best-effort: never let a write error
+ * mask the drill's own pass/fail result.
+ */
+async function writeArtifact(artifact: TtfeArtifact): Promise<void> {
+  // drill runs from integrations/cli (pnpm --filter), so climb to the repo root.
+  const repoRoot = path.resolve(process.cwd(), '..', '..');
+  const outPath = path.join(repoRoot, 'test-results', 'ttfe.json');
+  try {
+    await mkdir(path.dirname(outPath), { recursive: true });
+    await writeFile(outPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
+    console.log(`\n  → wrote timing artifact: ${outPath}`);
+  } catch (err) {
+    console.error(`  (could not write ${outPath}: ${err instanceof Error ? err.message : String(err)})`);
+  }
+}
 
 const EMAIL = process.env.SHIP_DRILL_EMAIL ?? 'dev@ship.local';
 const PASSWORD = process.env.SHIP_DRILL_PASSWORD ?? 'admin123';
@@ -115,6 +146,16 @@ async function drill(): Promise<void> {
   await listener.close();
 
   const envelope = JSON.parse(delivery.rawBody) as { type?: string; data?: { id?: string } };
+  const passed =
+    verified &&
+    envelope.type === 'document.created' &&
+    envelope.data?.id === doc.id &&
+    total < THRESHOLD_MS;
+
+  // Emit the trend artifact before any assertion throws, so CI always has a
+  // measurement to chart even on a failing run.
+  await writeArtifact({ ms: total, threshold_ms: THRESHOLD_MS, passed, steps: stages });
+
   console.log('\n  TTFE drill — five-line story');
   console.log(`  login     ${String(stages.login).padStart(6)} ms`);
   console.log(`  subscribe ${String(stages.subscribe).padStart(6)} ms`);
@@ -128,7 +169,7 @@ async function drill(): Promise<void> {
   if (!verified) throw new Error('signature did not verify');
   if (envelope.type !== 'document.created') throw new Error(`unexpected event: ${envelope.type}`);
   if (envelope.data?.id !== doc.id) throw new Error('event id did not match the created document');
-  if (total >= 60_000) throw new Error(`TTFE ${total}ms exceeded the 60s budget`);
+  if (total >= THRESHOLD_MS) throw new Error(`TTFE ${total}ms exceeded the 60s budget`);
   console.log('\n✓ TTFE drill passed.');
 }
 
