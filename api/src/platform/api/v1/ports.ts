@@ -59,6 +59,67 @@ export interface DocumentsPort {
   }): Promise<PublicDocument>;
 }
 
+/** Public representation of an issue on the v1 API. */
+export interface PublicIssue {
+  id: string;
+  title: string;
+  state: string;
+  priority: string;
+  assignee_id: string | null;
+  due_date: string | null;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Issues operations the public edge needs (DIP — implemented by an adapter). */
+export interface IssuesPort {
+  list(input: {
+    workspaceId: string;
+    limit: number;
+    cursor?: string;
+    state?: string;
+    priority?: string;
+    assignee_id?: string;
+  }): Promise<Page<PublicIssue>>;
+
+  get(input: { workspaceId: string; id: string }): Promise<PublicIssue | null>;
+
+  create(input: {
+    workspaceId: string;
+    createdBy: string | null;
+    title: string;
+    state?: string;
+    priority?: string;
+    properties?: Record<string, unknown>;
+  }): Promise<PublicIssue>;
+}
+
+/** Public representation of a sprint on the v1 API. */
+export interface PublicSprint {
+  id: string;
+  title: string;
+  status: string;
+  sprint_number: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  properties: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Sprints operations the public edge needs (DIP — implemented by an adapter). */
+export interface SprintsPort {
+  list(input: {
+    workspaceId: string;
+    limit: number;
+    cursor?: string;
+    status?: string;
+  }): Promise<Page<PublicSprint>>;
+
+  get(input: { workspaceId: string; id: string }): Promise<PublicSprint | null>;
+}
+
 export interface PublicSubscription {
   id: string;
   event_type: string;

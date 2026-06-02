@@ -6,6 +6,8 @@
  */
 export { ShipClient, type ShipClientOptions } from './client.js';
 export { DocumentsClient } from './resources/documents.js';
+export { IssuesClient } from './resources/issues.js';
+export { SprintsClient } from './resources/sprints.js';
 export {
   WebhooksClient,
   type WebhookSubscription,
@@ -33,4 +35,12 @@ export type {
   Page,
   ListDocumentsParams,
   CreateDocumentInput,
+  ShipIssue,
+  IssueState,
+  IssuePriority,
+  ListIssuesParams,
+  CreateIssueInput,
+  ShipSprint,
+  SprintStatus,
+  ListSprintsParams,
 } from './types.js';
