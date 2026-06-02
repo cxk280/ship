@@ -575,6 +575,9 @@ export const api = {
 
     listAuditCalls: (appId: string, limit = 50) =>
       request<AuditCallRow[]>(`/api/oauth/portal/apps/${appId}/audit?limit=${limit}`),
+
+    getUsageStats: (appId: string, window: UsageWindow = '24h') =>
+      request<UsageStats>(`/api/oauth/portal/apps/${appId}/usage/stats?window=${window}`),
   },
 };
 
@@ -659,4 +662,23 @@ export interface AuditCallRow {
   ip_address: string | null;
   user_agent: string | null;
   created_at: string;
+}
+
+export type UsageWindow = '1h' | '24h' | '7d' | '30d';
+
+export interface UsageRouteStat {
+  route: string;
+  calls: number;
+  errors: number;
+  error_rate: number;
+}
+
+export interface UsageStats {
+  window: UsageWindow;
+  total_calls: number;
+  error_calls: number;
+  error_rate: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  top_routes: UsageRouteStat[];
 }
