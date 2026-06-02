@@ -37,6 +37,7 @@
     "@langchain/langgraph": "^1.3.2",
     "@langchain/langgraph-checkpoint-postgres": "^1.0.1",
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@ship/sdk": "workspace:*",
     "@ship/shared": "workspace:*",
     "bcryptjs": "^3.0.3",
     "cookie": "^1.1.1",

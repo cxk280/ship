@@ -3,6 +3,22 @@ import { pool } from '../db/client.js';
 import type { IssueRow, Scope } from './types.js';
 
 /**
+ * Feature flag: PLUGFORGE_AGENT_VIA_SDK
+ *
+ * When truthy (non-empty, non-"0", non-"false") the agent's issue fetch is
+ * routed through the @ship/sdk + /api/v1 (client_credentials) path instead
+ * of the direct DB query. Both paths produce the same IssueRow shape; the
+ * graph nodes and LLM prompts are unchanged (token-neutral).
+ *
+ * Default OFF — existing behaviour and tests are unaffected when the var is
+ * absent or falsy.
+ */
+export function isAgentViaSdkEnabled(): boolean {
+  const v = process.env.PLUGFORGE_AGENT_VIA_SDK;
+  return !!v && v !== '0' && v.toLowerCase() !== 'false';
+}
+
+/**
  * Fetch issues in scope as normalized rows (incl. last-activity for staleness).
  * Mutation scope → the specific entityIds. Cron scope → open work in the workspace.
  */
@@ -265,3 +281,4 @@ export async function fetchSprintProgress(workspaceId: string): Promise<SprintPr
   );
   return r.rows.map((x) => ({ sprintId: x.sprint_id, total: x.total, done: x.done }));
 }
+
