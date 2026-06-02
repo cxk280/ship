@@ -10,10 +10,13 @@ import { documentsDomain, type DomainDocument } from '../../domain/documents.js'
 import { encodeCursor, decodeCursor } from '../cursor.js';
 import type { SprintsPort, PublicSprint, Page } from '../api/v1/ports.js';
 
+type PublicSprintStatus = 'planned' | 'active' | 'completed';
+
 /** Derive a sprint's logical status from its properties. */
-function deriveStatus(props: Record<string, unknown>): string {
+function deriveStatus(props: Record<string, unknown>): PublicSprintStatus {
   // Sprint status may be stored explicitly or inferred from date fields.
-  if (props.status) return props.status as string;
+  if (props.status === 'planning' || props.status === 'planned') return 'planned';
+  if (props.status === 'active' || props.status === 'completed') return props.status;
   if (props.completed_at || props.end_date) {
     // If end_date is in the past, treat as completed.
     const endDate = props.completed_at ?? props.end_date;

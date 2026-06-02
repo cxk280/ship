@@ -65,7 +65,7 @@ beforeAll(async () => {
   // Create a sprint directly in the DB via documentsDomain so GET tests have data.
   const sprint = await pool.query(
     `INSERT INTO documents (workspace_id, document_type, title, properties, created_by)
-     VALUES ($1, 'sprint', 'Sprint 1', '{"sprint_number":1,"status":"planned"}', $2)
+     VALUES ($1, 'sprint', 'Sprint 1', '{"sprint_number":1,"status":"planning"}', $2)
      RETURNING id`,
     [workspaceId, userId],
   );
@@ -84,6 +84,19 @@ describe('GET /api/v1/sprints', () => {
     // The sprint we created should appear
     const found = res.body.data.find((s: { id: string }) => s.id === sprintId);
     expect(found).toBeDefined();
+    expect(found.status).toBe('planned');
+  });
+
+  it('matches internal planning sprints with the public planned status filter', async () => {
+    const token = await mintToken(['sprints:read']);
+    const res = await request(v1App())
+      .get('/api/v1/sprints?status=planned')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const found = res.body.data.find((s: { id: string }) => s.id === sprintId);
+    expect(found).toBeDefined();
+    expect(found.status).toBe('planned');
+    expect(res.body.data.every((s: { status: string }) => s.status === 'planned')).toBe(true);
   });
 
   it('returns cursor pagination with {data, next_cursor}', async () => {
@@ -115,7 +128,7 @@ describe('GET /api/v1/sprints/:id', () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(sprintId);
     expect(res.body.title).toBe('Sprint 1');
-    expect(typeof res.body.status).toBe('string');
+    expect(res.body.status).toBe('planned');
     expect('sprint_number' in res.body).toBe(true);
   });
 
