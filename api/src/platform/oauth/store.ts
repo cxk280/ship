@@ -32,6 +32,9 @@ export interface AccessTokenRow {
   grant_type: string;
   expires_at: string;
   revoked_at: string | null;
+  /** RFC 9449 DPoP binding: JWK thumbprint (jkt), or null for a plain Bearer token. */
+  dpop_jkt: string | null;
+  created_at?: string;
 }
 
 export interface RefreshTokenRow {
@@ -84,6 +87,8 @@ export interface AccessTokenMintInput {
   scopes: string[];
   grantType: string;
   expiresAt: Date;
+  /** RFC 9449: JWK thumbprint to sender-constrain the token. Omit for plain Bearer. */
+  dpopJkt?: string | null;
 }
 
 export interface RefreshTokenMintInput {
@@ -98,8 +103,8 @@ export interface RefreshTokenMintInput {
 
 async function insertAccessTokenInTx(client: PoolClient, input: AccessTokenMintInput): Promise<void> {
   await client.query(
-    `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at, dpop_jkt)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [
       input.tokenHash,
       input.appId,
@@ -108,6 +113,7 @@ async function insertAccessTokenInTx(client: PoolClient, input: AccessTokenMintI
       input.scopes,
       input.grantType,
       input.expiresAt,
+      input.dpopJkt ?? null,
     ],
   );
 }
@@ -254,19 +260,20 @@ export async function consumeAuthCodeAndMintTokens(input: {
 
 // ---- access tokens --------------------------------------------------------
 
-export async function insertAccessToken(input: {
-  tokenHash: string;
-  appId: string;
-  userId: string | null;
-  workspaceId: string | null;
-  scopes: string[];
-  grantType: string;
-  expiresAt: Date;
-}): Promise<AccessTokenRow> {
+export async function insertAccessToken(input: AccessTokenMintInput): Promise<AccessTokenRow> {
   const r = await pool.query(
-    `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [input.tokenHash, input.appId, input.userId, input.workspaceId, input.scopes, input.grantType, input.expiresAt],
+    `INSERT INTO oauth_access_tokens (token_hash, app_id, user_id, workspace_id, scopes, grant_type, expires_at, dpop_jkt)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [
+      input.tokenHash,
+      input.appId,
+      input.userId,
+      input.workspaceId,
+      input.scopes,
+      input.grantType,
+      input.expiresAt,
+      input.dpopJkt ?? null,
+    ],
   );
   return r.rows[0] as AccessTokenRow;
 }
@@ -291,6 +298,44 @@ export async function getAccessTokenWithApp(tokenHash: string): Promise<
 
 export async function touchAccessToken(id: string): Promise<void> {
   await pool.query('UPDATE oauth_access_tokens SET last_used_at = now() WHERE id = $1', [id]);
+}
+
+/**
+ * Introspection lookup (RFC 7662): the full access-token row plus its app's
+ * client_id and active flag. Returns null if no row matches the hash.
+ */
+export async function getAccessTokenForIntrospection(
+  tokenHash: string,
+): Promise<
+  | (AccessTokenRow & { client_id: string; app_is_active: boolean; created_at: string })
+  | null
+> {
+  const r = await pool.query(
+    `SELECT t.*, a.client_id AS client_id, a.is_active AS app_is_active
+     FROM oauth_access_tokens t JOIN oauth_apps a ON t.app_id = a.id
+     WHERE t.token_hash = $1`,
+    [tokenHash],
+  );
+  return (r.rows[0] as (AccessTokenRow & { client_id: string; app_is_active: boolean; created_at: string })) ?? null;
+}
+
+/**
+ * Introspection lookup for a refresh token. Returns the full row plus the app's
+ * client_id and active flag, or null.
+ */
+export async function getRefreshTokenForIntrospection(
+  tokenHash: string,
+): Promise<
+  | (RefreshTokenRow & { client_id: string; app_is_active: boolean; created_at: string })
+  | null
+> {
+  const r = await pool.query(
+    `SELECT t.*, a.client_id AS client_id, a.is_active AS app_is_active
+     FROM oauth_refresh_tokens t JOIN oauth_apps a ON t.app_id = a.id
+     WHERE t.token_hash = $1`,
+    [tokenHash],
+  );
+  return (r.rows[0] as (RefreshTokenRow & { client_id: string; app_is_active: boolean; created_at: string })) ?? null;
 }
 
 // ---- refresh tokens -------------------------------------------------------

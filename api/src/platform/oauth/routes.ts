@@ -4,6 +4,7 @@
  *   GET  /oauth/authorize            consent screen (Auth Code + PKCE)
  *   POST /oauth/authorize/decision   approve/deny → issues code, redirects back
  *   POST /oauth/token                token endpoint (all four grant types)
+ *   POST /oauth/introspect           token introspection (RFC 7662)
  *   POST /oauth/device/code          device authorization request (RFC 8628)
  *   GET  /oauth/device               device verification / consent page
  *   POST /oauth/device/decision      approve/deny a device
@@ -11,11 +12,17 @@
  * These endpoints authenticate a Ship *user* via session cookie (consent) or a
  * *client* via client_id/secret (token). They return RFC OAuth error bodies, not
  * the /api/v1 ApiError shape.
+ *
+ * DPoP (RFC 9449): the token endpoint optionally accepts a `DPoP` proof header.
+ * When present, the issued access token is sender-constrained to the proof key's
+ * JWK thumbprint and returned with token_type "DPoP". Absent ⇒ plain Bearer.
  */
 import { Router, type Request, type Response } from 'express';
 import crypto from 'crypto';
 import { OAuthError, sendOAuthError } from './errors.js';
 import * as service from './service.js';
+import { verifyDpopProof, DpopError, DPOP_ALGS } from './dpop.js';
+import { registerJti } from './dpop-replay.js';
 import {
   getAppByClientId,
   getAppById,
@@ -79,6 +86,34 @@ function extractClientCreds(req: Request): { clientId?: string; clientSecret?: s
     clientId: typeof req.body?.client_id === 'string' ? req.body.client_id : undefined,
     clientSecret: typeof req.body?.client_secret === 'string' ? req.body.client_secret : undefined,
   };
+}
+
+/** Proof freshness window for token-endpoint DPoP proofs (seconds). */
+const DPOP_PROOF_MAX_AGE_SEC = 300;
+
+/**
+ * If the request carries a `DPoP` header, verify the proof (RFC 9449 §5) against
+ * this endpoint (htm=POST, htu=the token endpoint URL) and return the binding to
+ * apply to the issued token. No header ⇒ undefined (plain Bearer). A malformed /
+ * invalid proof is a hard `invalid_dpop_proof` error per the RFC.
+ */
+function dpopBindingFromRequest(req: Request): service.DpopBinding | undefined {
+  const raw = req.headers['dpop'];
+  if (raw === undefined) return undefined;
+  const proof = Array.isArray(raw) ? raw[0] : raw;
+  if (!proof) throw new OAuthError('invalid_dpop_proof', 'Empty DPoP proof header');
+  const htu = `${baseUrl(req)}/oauth/token`;
+  let claims;
+  try {
+    claims = verifyDpopProof({ proof, htm: 'POST', htu, maxAgeSec: DPOP_PROOF_MAX_AGE_SEC });
+  } catch (err) {
+    if (err instanceof DpopError) throw new OAuthError('invalid_dpop_proof', err.message);
+    throw err;
+  }
+  if (!registerJti(claims.jti, DPOP_PROOF_MAX_AGE_SEC)) {
+    throw new OAuthError('invalid_dpop_proof', 'DPoP proof replay detected');
+  }
+  return { jkt: claims.jkt };
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +248,8 @@ export function createOAuthRouter(): RouterT {
     const grantType = req.body?.grant_type;
     try {
       const { clientId, clientSecret } = extractClientCreds(req);
+      // Opt-in, additive: undefined unless the client sent a (valid) DPoP proof.
+      const dpop = dpopBindingFromRequest(req);
 
       if (grantType === 'authorization_code') {
         const app = await service.authenticateClient(clientId, clientSecret);
@@ -221,6 +258,7 @@ export function createOAuthRouter(): RouterT {
           code: req.body.code,
           redirectUri: req.body.redirect_uri,
           codeVerifier: req.body.code_verifier,
+          dpop,
         });
         res.json(tokens);
         return;
@@ -232,6 +270,7 @@ export function createOAuthRouter(): RouterT {
           app,
           refreshToken: req.body.refresh_token,
           requestedScopes: parseScopes(req.body.scope),
+          dpop,
         });
         res.json(tokens);
         return;
@@ -242,6 +281,7 @@ export function createOAuthRouter(): RouterT {
         const tokens = await service.clientCredentials({
           app,
           requestedScopes: parseScopes(req.body.scope),
+          dpop,
         });
         res.json(tokens);
         return;
@@ -250,7 +290,7 @@ export function createOAuthRouter(): RouterT {
       if (grantType === 'urn:ietf:params:oauth:grant-type:device_code') {
         // Device clients are public; secret is optional, client_id identifies the app.
         const app = await service.authenticateClient(clientId, clientSecret);
-        const tokens = await service.pollDeviceToken({ app, deviceCode: req.body.device_code });
+        const tokens = await service.pollDeviceToken({ app, deviceCode: req.body.device_code, dpop });
         res.json(tokens);
         return;
       }
@@ -262,6 +302,31 @@ export function createOAuthRouter(): RouterT {
         return;
       }
       console.error('[oauth/token] unexpected error:', err);
+      sendOAuthError(res, new OAuthError('server_error', 'Internal error'));
+    }
+  });
+
+  // ---- Token introspection (RFC 7662) -------------------------------------
+  // The requesting client authenticates exactly like the token endpoint
+  // (client_id/secret, Basic or body). It then posts token=<access|refresh>. The
+  // response never reveals WHY an inactive token is inactive (RFC 7662 §2.2).
+  router.post('/introspect', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+    try {
+      const { clientId, clientSecret } = extractClientCreds(req);
+      // Authenticate the caller; a bad/absent secret is invalid_client (401).
+      await service.authenticateClient(clientId, clientSecret);
+
+      const token = typeof req.body?.token === 'string' ? req.body.token : '';
+      const result = await service.introspect(token);
+      res.json(result);
+    } catch (err) {
+      if (err instanceof OAuthError) {
+        sendOAuthError(res, err);
+        return;
+      }
+      console.error('[oauth/introspect] unexpected error:', err);
       sendOAuthError(res, new OAuthError('server_error', 'Internal error'));
     }
   });

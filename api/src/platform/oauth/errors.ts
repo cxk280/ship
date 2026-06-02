@@ -20,7 +20,9 @@ export type OAuthErrorCode =
   // RFC 8628 device-flow polling states
   | 'authorization_pending'
   | 'slow_down'
-  | 'expired_token';
+  | 'expired_token'
+  // RFC 9449 DPoP — a malformed / invalid proof presented at the token endpoint
+  | 'invalid_dpop_proof';
 
 const STATUS_BY_ERROR: Partial<Record<OAuthErrorCode, number>> = {
   invalid_client: 401,
