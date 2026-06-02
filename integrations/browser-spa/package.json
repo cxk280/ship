@@ -1,0 +1,26 @@
+{
+  "name": "@ship/browser-spa",
+  "version": "0.1.0",
+  "description": "Ship browser SPA — Authorization Code + PKCE reference integration.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite --port 5180",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 5180",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@ship/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.3",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.19",
+    "vitest": "^4.0.16"
+  }
+}

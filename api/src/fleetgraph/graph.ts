@@ -8,10 +8,11 @@
 import { StateGraph, START, END, interrupt } from '@langchain/langgraph';
 import { FleetGraphState, type FleetGraphStateType } from './state.js';
 import {
-  fetchIssues, fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
+  fetchWeeks, fetchTeam, fetchProjects, fetchWorkspaceAdmins,
   fetchWorkspaceMeta, fetchSprintProgress, fetchPersonUserId, fetchDocumentCensus, fetchDocumentIndex,
   type PersonRow, type WeekRow, type SprintProgress, type WorkspaceMeta, type ProjectRow, type DocumentCensus, type DocIndexEntry,
 } from './fetch.js';
+import { fetchIssuesFlagged } from './fetch-flagged.js';
 import { detectSignals, detectSprintSlip, detectCapacity } from './detectors.js';
 import { invokeTier, extractJson, isLlmAvailable } from './llm.js';
 import { loadKnownFindings, loadDismissalCounts, recordFinding, setFindingStatusByDedup, upsertPendingApproval, resolvePendingApproval, resolveClearedFindings } from './findings-store.js';
@@ -60,7 +61,11 @@ async function resolveContext(state: S): Promise<Update> {
 
 // ---------------------------------------------------------------- parallel fetch
 async function nodeFetchIssues(state: S): Promise<Update> {
-  return { raw: { issues: await fetchIssues(state.workspaceId, state.scope) } };
+  // Epic 7 (Platform Citizen): when PLUGFORGE_AGENT_VIA_SDK is ON, workspace-wide
+  // issue fetches are routed through the SDK → /api/v1 path (client_credentials).
+  // Narrow-scoped fetches (by entity/sprint/project/assignee) still use the direct
+  // DB path because /api/v1 does not yet expose association filters.
+  return { raw: { issues: await fetchIssuesFlagged(state.workspaceId, state.scope) } };
 }
 async function nodeFetchWeeks(state: S): Promise<Update> {
   return { raw: { weeks: await fetchWeeks(state.workspaceId) } };

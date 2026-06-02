@@ -16,7 +16,8 @@ import { Router, Request, Response } from 'express';
 import { pool } from '../db/client.js';
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+type RouterType = ReturnType<typeof Router>;
+const router: RouterType = Router();
 
 interface ClaudeContextRequest {
   context_type: 'standup' | 'review' | 'retro';

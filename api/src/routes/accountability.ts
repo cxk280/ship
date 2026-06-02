@@ -9,7 +9,8 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { checkMissingAccountability } from '../services/accountability.js';
 
-const router = Router();
+type RouterType = ReturnType<typeof Router>;
+const router: RouterType = Router();
 
 /**
  * GET /api/accountability/action-items

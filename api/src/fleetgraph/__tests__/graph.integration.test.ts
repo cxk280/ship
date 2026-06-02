@@ -1,13 +1,26 @@
 // Layer 2 — graph-path + HITL integration tests against a real (truncated) DB.
 // Hermetic: FLEETGRAPH_DISABLE_LLM forces deterministic fallbacks (no tokens, repeatable).
 // Asserts each path's side effects and the autonomy boundary (no mutation before approval).
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+//
+// Epic 7 (Platform Citizen): when PLUGFORGE_AGENT_VIA_SDK=1 the graph routes
+// workspace-wide issue fetches through fetch-sdk.ts (→ /api/v1 client_credentials).
+// There is no live server in unit tests, so we stub fetchIssuesViaSdk to fall
+// back to the direct DB query — this keeps integration tests hermetic regardless
+// of flag state without changing their semantics.
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { randomUUID } from 'crypto';
 import { pool } from '../../db/client.js';
 import { runProactiveForEntity, runDigest, resumeApproval } from '../runner.js';
 import { fetchIssues, fetchDocumentCensus, fetchDocumentIndex, fetchPersonUserId } from '../fetch.js';
 import { claimPendingApproval, revertPendingApprovalClaim } from '../findings-store.js';
 import type { Scope } from '../types.js';
+
+// Stub the SDK adapter so integration tests remain hermetic with or without
+// PLUGFORGE_AGENT_VIA_SDK set. The stub delegates back to the real DB fetch,
+// preserving all real data semantics — only the transport layer differs.
+vi.mock('../fetch-sdk.js', () => ({
+  fetchIssuesViaSdk: async (workspaceId: string, scope: Scope) => fetchIssues(workspaceId, scope),
+}));
 
 process.env.FLEETGRAPH_DISABLE_LLM = '1';
 
