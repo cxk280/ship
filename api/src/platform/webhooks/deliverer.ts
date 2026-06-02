@@ -52,10 +52,102 @@ export interface IWebhookDeliverer {
   enqueue(job: DeliveryJob): void;
 }
 
-function isTransient(status: number): boolean {
+export function isTransient(status: number): boolean {
   if (status === 0) return true; // network error / timeout
   if (status >= 500) return true;
   return status === 408 || status === 429; // request timeout / too many requests
+}
+
+/**
+ * The retry/backoff schedule is NON-exponential (1s/4s/16s/1m/5m/30m), so any
+ * queue backend (BullMQ, SQS) that wants native delayed-retry must map the
+ * attempt number onto this table rather than a fixed multiplier. Returns the
+ * delay (ms) to wait BEFORE attempt `n+1`, given that attempt `n` just failed.
+ *
+ * `n` is 1-based (the attempt that just ran). The first retry (after attempt 1)
+ * waits RETRY_DELAYS_MS[0] = 1000ms. Returns 0 if no retry remains.
+ */
+export function backoffForAttempt(n: number): number {
+  if (n < 1 || n >= MAX_ATTEMPTS) return 0;
+  return RETRY_DELAYS_MS[n - 1] ?? 0;
+}
+
+/** Outcome of processing a single delivery attempt — drives the queue loop. */
+export type AttemptOutcome =
+  | { kind: 'delivered' }
+  | { kind: 'dead' }
+  | { kind: 'retry'; delayMs: number };
+
+/**
+ * Process ONE delivery attempt and persist its result. This is the single
+ * source of truth for retry/DLQ semantics, shared by every IWebhookDeliverer
+ * backend (in-memory queue + BullMQ/Redis) so they are observably identical:
+ * same signing, same idempotency-key header, same transient/permanent
+ * classification, same DLQ-after-MAX_ATTEMPTS, same failure-counter side
+ * effects. The backend only decides HOW to wait between attempts.
+ *
+ * Returns an AttemptOutcome telling the caller whether to stop (delivered/dead)
+ * or to re-enqueue after `delayMs` (retry). Mirrors QueueWebhookDeliverer.attempt
+ * exactly; the in-memory deliverer below delegates to it.
+ */
+export async function processAttempt(
+  job: DeliveryJob,
+  n: number,
+  deps: { clock: Clock; transport: Transport; jitter?: () => number },
+): Promise<AttemptOutcome> {
+  const startedMs = deps.clock.now();
+  const body = JSON.stringify(job.envelope);
+  const tSec = Math.floor(deps.clock.now() / 1000);
+  const sig = signPayload(job.subscription.signingSecret, body, tSec);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Ship-Signature': sig.header,
+    'Idempotency-Key': job.idempotencyKey,
+  };
+
+  // Dual-sign: add the Ed25519 header when the app has an active signing key
+  // (B11). Lives here in the shared per-attempt path so EVERY deliverer backend
+  // (in-memory + BullMQ) signs identically — the key PEM rides on the job.
+  if (job.ed25519PrivateKeyPem) {
+    const ed = signPayloadEd25519(job.ed25519PrivateKeyPem, body, tSec);
+    headers[SHIP_SIGNATURE_ED25519_HEADER] = ed.header;
+  }
+
+  const result = await deps.transport(job.subscription.targetUrl, { headers, body });
+
+  const latency = deps.clock.now() - startedMs;
+  const ok = result.status >= 200 && result.status < 300;
+
+  if (ok) {
+    await updateDeliveryAttempt(job.deliveryId, {
+      attemptNumber: n, status: 'delivered', responseStatus: result.status,
+      responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency,
+      nextAttemptAt: null, deliveredAt: new Date(deps.clock.now()),
+    });
+    await recordDeliverySuccess(job.subscription.id);
+    return { kind: 'delivered' };
+  }
+
+  const transient = isTransient(result.status);
+  if (!transient || n >= MAX_ATTEMPTS) {
+    // permanent 4xx, or retries exhausted → dead-letter
+    await updateDeliveryAttempt(job.deliveryId, {
+      attemptNumber: n, status: 'dead', responseStatus: result.status,
+      responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency, nextAttemptAt: null,
+    });
+    await recordDeliveryFailure(job.subscription.id, AUTO_DISABLE_THRESHOLD);
+    return { kind: 'dead' };
+  }
+
+  // transient + retries remain → schedule the next attempt
+  const delay = backoffForAttempt(n) + (deps.jitter?.() ?? 0);
+  await updateDeliveryAttempt(job.deliveryId, {
+    attemptNumber: n, status: 'pending', responseStatus: result.status,
+    responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency,
+    nextAttemptAt: new Date(deps.clock.now() + delay),
+  });
+  return { kind: 'retry', delayMs: delay };
 }
 
 /**
@@ -152,58 +244,13 @@ export class QueueWebhookDeliverer implements IWebhookDeliverer {
   }
 
   private async attempt(job: DeliveryJob, n: number): Promise<void> {
-    const startedMs = this.deps.clock.now();
-    const body = JSON.stringify(job.envelope);
-    const tSec = Math.floor(this.deps.clock.now() / 1000);
-    const sig = signPayload(job.subscription.signingSecret, body, tSec);
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Ship-Signature': sig.header,
-      'Idempotency-Key': job.idempotencyKey,
-    };
-
-    // Add Ed25519 header if the app has a signing key.
-    if (job.ed25519PrivateKeyPem) {
-      const ed = signPayloadEd25519(job.ed25519PrivateKeyPem, body, tSec);
-      headers[SHIP_SIGNATURE_ED25519_HEADER] = ed.header;
+    // Delegate the retry/DLQ state machine to the shared processAttempt() so the
+    // in-memory and BullMQ deliverers are observably identical; only the WAIT
+    // mechanism differs (setTimeout-via-Clock here, Redis delayed jobs there).
+    // processAttempt() also applies the B11 Ed25519 dual-signing path.
+    const outcome = await processAttempt(job, n, this.deps);
+    if (outcome.kind === 'retry') {
+      this.deps.clock.schedule(() => this.attempt(job, n + 1), outcome.delayMs);
     }
-
-    const result = await this.deps.transport(job.subscription.targetUrl, { headers, body });
-
-    const latency = this.deps.clock.now() - startedMs;
-    const ok = result.status >= 200 && result.status < 300;
-
-    if (ok) {
-      await updateDeliveryAttempt(job.deliveryId, {
-        attemptNumber: n, status: 'delivered', responseStatus: result.status,
-        responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency,
-        nextAttemptAt: null, deliveredAt: new Date(this.deps.clock.now()),
-      });
-      // Reset consecutive failure counter on success.
-      await recordDeliverySuccess(job.subscription.id);
-      return;
-    }
-
-    const transient = isTransient(result.status);
-    if (!transient || n >= MAX_ATTEMPTS) {
-      // permanent 4xx, or retries exhausted → dead-letter
-      await updateDeliveryAttempt(job.deliveryId, {
-        attemptNumber: n, status: 'dead', responseStatus: result.status,
-        responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency, nextAttemptAt: null,
-      });
-      // Increment consecutive failure counter; auto-disable if threshold reached.
-      await recordDeliveryFailure(job.subscription.id, AUTO_DISABLE_THRESHOLD);
-      return;
-    }
-
-    // transient + retries remain → schedule the next attempt
-    const delay = RETRY_DELAYS_MS[n - 1]! + (this.deps.jitter?.() ?? 0);
-    await updateDeliveryAttempt(job.deliveryId, {
-      attemptNumber: n, status: 'pending', responseStatus: result.status,
-      responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency,
-      nextAttemptAt: new Date(this.deps.clock.now() + delay),
-    });
-    this.deps.clock.schedule(() => this.attempt(job, n + 1), delay);
   }
 }

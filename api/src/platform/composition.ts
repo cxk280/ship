@@ -10,6 +10,7 @@
  * app.ts (the canonical composition root, per docs/architecture.md) calls
  * `buildPlatform()` and mounts the returned router at `/api/v1`.
  */
+import { createRequire } from 'node:module';
 import type { Router } from 'express';
 import { createV1Router, type PlatformDeps } from './api/v1/router.js';
 import { bearerAuth } from './oauth/bearer.js';
@@ -23,7 +24,7 @@ import { createIdempotencyAdapter } from './adapters/idempotency.js';
 import { InMemoryTokenBucketLimiter } from './ratelimit/limiter.js';
 import { createRateLimitMiddleware } from './ratelimit/middleware.js';
 import { systemClock } from './webhooks/clock.js';
-import { QueueWebhookDeliverer, fetchTransport } from './webhooks/deliverer.js';
+import { QueueWebhookDeliverer, fetchTransport, type IWebhookDeliverer } from './webhooks/deliverer.js';
 import { InMemoryEventBus } from './webhooks/event-bus.js';
 import { getOrCreateActiveKey } from './webhooks/signing-keys.js';
 
@@ -57,11 +58,12 @@ export function buildPlatform(): Platform {
 
   // Webhook pipeline: domain writes → event bus → deliverer (retry/DLQ). Jitter is
   // applied in production only (kept at 0 under test for determinism).
-  const deliverer = new QueueWebhookDeliverer({
-    clock: systemClock,
-    transport: fetchTransport(),
-    jitter: relaxed ? () => 0 : () => Math.floor(Math.random() * 1000),
-  });
+  // Deliverer backend is env-selected (in-memory default; BullMQ/Redis when
+  // WEBHOOK_DELIVERER=bullmq + REDIS_URL) — B8. The event bus resolves the app's
+  // active Ed25519 signing key and rides it on each job so the deliverer can
+  // dual-sign (Ship-Signature-Ed25519) — B11. Both backends honor the key
+  // because the signing happens in the shared processAttempt().
+  const deliverer = buildWebhookDeliverer(relaxed);
   const eventBus = new InMemoryEventBus({
     deliverer,
     clock: systemClock,
@@ -88,4 +90,43 @@ export function buildPlatform(): Platform {
   };
   const v1Router = createV1Router(deps);
   return { v1Router };
+}
+
+/**
+ * Select the webhook deliverer at the composition root.
+ *
+ * Default (and every deploy that hasn't opted in): the in-memory
+ * QueueWebhookDeliverer — nothing changes, no Redis dependency is loaded. Set
+ * `WEBHOOK_DELIVERER=bullmq` AND `REDIS_URL` to swap in the Redis-backed
+ * BullMqWebhookDeliverer, which is a Liskov drop-in: same IWebhookDeliverer
+ * interface, same retry/DLQ/SSRF semantics (it shares processAttempt()), just
+ * durable queue state in Redis.
+ *
+ * bullmq/ioredis are loaded LAZILY (dynamic require) so they are imported only
+ * when actually selected — the default path never touches them, and they never
+ * leak toward the @ship/sdk / api/v1 boundary.
+ */
+export function buildWebhookDeliverer(relaxed: boolean): IWebhookDeliverer {
+  const jitter = relaxed ? () => 0 : () => Math.floor(Math.random() * 1000);
+  const transport = fetchTransport();
+
+  if (process.env.WEBHOOK_DELIVERER === 'bullmq') {
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+      throw new Error(
+        'WEBHOOK_DELIVERER=bullmq requires REDIS_URL to be set (the Redis connection string).',
+      );
+    }
+    // Lazy CJS require keeps bullmq/ioredis out of the default deploy's module graph.
+    const require = createRequire(import.meta.url);
+    const { BullMqWebhookDeliverer } = require('./webhooks/bullmq-deliverer.js') as typeof import('./webhooks/bullmq-deliverer.js');
+    return new BullMqWebhookDeliverer({
+      connection: redisUrl,
+      transport,
+      clock: systemClock,
+      jitter,
+    });
+  }
+
+  return new QueueWebhookDeliverer({ clock: systemClock, transport, jitter });
 }
