@@ -162,6 +162,9 @@ export function createApp(corsOrigin: string = 'http://localhost:5173'): express
   // so these global parsers skip it — the one-way-door boundary again.
   const skipV1 = (parser: express.RequestHandler): express.RequestHandler => (req, res, next) =>
     req.path.startsWith('/api/v1') ? next() : parser(req, res, next);
+  // GitHub secret-scanning (B13) signs the RAW body with ECDSA; we must verify the
+  // exact bytes. Capture this one path as text BEFORE the JSON parser consumes it.
+  app.use('/oauth/secret-scanning', express.text({ type: () => true, limit: '1mb' }));
   app.use(skipV1(express.json({ limit: '10mb' })));  // Large wiki documents can be several MB
   app.use(skipV1(express.urlencoded({ extended: true, limit: '10mb' }))); // For HTML form submissions
   app.use(cookieParser(sessionSecret));

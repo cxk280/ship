@@ -288,6 +288,7 @@ docker-compose -f docker-compose.prod.yml up
 - **No external CDN** — All assets served from your infrastructure
 - **Session timeout** — 15-minute idle timeout (government standard)
 - **Audit logging** — Track all document operations
+- **Leaked-secret auto-revoke** — Ship is a [GitHub Secret Scanning partner](https://docs.github.com/en/code-security/secret-scanning/secret-scanning-partner-program). If a Plugforge OAuth client secret (`ship_secret_…`) or API token (`ship_…`) is pushed to a public repo, GitHub POSTs the leaked token to `POST /oauth/secret-scanning` (ECDSA-signed). Ship verifies the signature, then revokes the secret and cascade-revokes the app's live access + refresh tokens automatically — every event is audit-logged. **Re-issue:** the owner rotates the secret via `POST /api/oauth/apps/:id/rotate-secret` (or the portal), which clears the revocation and issues a fresh `ship_secret_…`.
 
 > **Reporting Vulnerabilities:** See [SECURITY.md](./SECURITY.md) for our vulnerability disclosure policy.
 

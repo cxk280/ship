@@ -76,6 +76,13 @@ export async function authenticateClient(
   const app = await store.getAppByClientId(clientId);
   if (!app) throw new OAuthError('invalid_client', 'Unknown or inactive client');
 
+  // Leaked-secret response (B13): a revoked secret can never authenticate again,
+  // even if the presented raw value still matches the stored hash. The owner
+  // must rotate the secret (which clears this state) to continue.
+  if (app.secret_revoked_at) {
+    throw new OAuthError('invalid_client', 'Client secret has been revoked; rotate the secret to continue');
+  }
+
   if (app.app_type === 'public') {
     // Public client: secret optional; if supplied, it must still match.
     if (clientSecret && !(await verifyClientSecret(clientSecret, app.client_secret_hash))) {

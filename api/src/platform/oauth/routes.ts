@@ -33,8 +33,18 @@ import {
 import { getSessionUser } from './session.js';
 import { consentPage, deviceVerifyPage, devicePostedPage } from './consent-page.js';
 import { logAuditEvent } from '../../services/audit.js';
+import {
+  processSecretScanningReport,
+  type SecretScanningAlert,
+  type SignatureVerifier,
+} from './secret-scanning.js';
 
 type RouterT = ReturnType<typeof Router>;
+
+/** Options for the OAuth router. `secretScanningVerifier` is injected by tests. */
+export interface OAuthRouterOptions {
+  secretScanningVerifier?: SignatureVerifier;
+}
 
 // ---- helpers --------------------------------------------------------------
 
@@ -67,6 +77,12 @@ function frameBust(res: Response): void {
 function parseScopes(scope: unknown): string[] {
   if (typeof scope !== 'string' || scope.trim() === '') return [];
   return scope.trim().split(/\s+/);
+}
+
+/** Normalize a possibly-array Express header to a single string. */
+function firstHeader(h: string | string[] | undefined): string | undefined {
+  if (Array.isArray(h)) return h[0];
+  return h;
 }
 
 /** Extract client credentials from HTTP Basic or the request body. */
@@ -118,8 +134,50 @@ function dpopBindingFromRequest(req: Request): service.DpopBinding | undefined {
 
 // ---------------------------------------------------------------------------
 
-export function createOAuthRouter(): RouterT {
+export function createOAuthRouter(options: OAuthRouterOptions = {}): RouterT {
   const router = Router();
+
+  // ---- GitHub secret-scanning partner: leaked-secret auto-revoke (B13) ----
+  // GitHub signs the raw body with ECDSA. We need the EXACT bytes, so this route
+  // takes a text body (mounted with a raw text parser at the app level / in
+  // tests) rather than the JSON-parsed body. Not OpenAPI-registered (like /token).
+  router.post('/secret-scanning', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    // The body may arrive as a raw string (preferred — preserves signed bytes) or,
+    // if some upstream parsed it, as an object we re-serialize as a best effort.
+    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body ?? '');
+    let alerts: SecretScanningAlert[];
+    try {
+      const parsed = JSON.parse(rawBody);
+      if (!Array.isArray(parsed)) throw new Error('not an array');
+      alerts = parsed as SecretScanningAlert[];
+    } catch {
+      res.status(400).json({ error: 'invalid_request', error_description: 'Body must be a JSON array' });
+      return;
+    }
+
+    const keyIdentifier = firstHeader(req.headers['github-public-key-identifier']);
+    const signature = firstHeader(req.headers['github-public-key-signature']);
+
+    try {
+      const outcome = await processSecretScanningReport({
+        verifier: options.secretScanningVerifier,
+        rawBody,
+        keyIdentifier,
+        signature,
+        alerts,
+        req,
+      });
+      if (!outcome.ok) {
+        res.status(401).json({ error: 'invalid_signature' });
+        return;
+      }
+      res.status(200).json(outcome.results);
+    } catch (err) {
+      console.error('[oauth/secret-scanning] unexpected error:', err);
+      res.status(500).json({ error: 'server_error' });
+    }
+  });
 
   // ---- Authorization Code + PKCE: consent screen --------------------------
   router.get('/authorize', async (req: Request, res: Response) => {
