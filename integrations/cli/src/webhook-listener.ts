@@ -10,7 +10,10 @@ export interface ReceivedDelivery {
 }
 
 export interface Listener {
+  /** The URL to subscribe with — the public tunnel URL when one is given, else the local one. */
   url: string;
+  /** Always the local URL the HTTP server is bound to (for logging/diagnostics). */
+  localUrl: string;
   port: number;
   /** Resolves on the next delivery (within timeoutMs, else rejects). */
   waitFor(timeoutMs: number): Promise<ReceivedDelivery>;
@@ -18,7 +21,22 @@ export interface Listener {
   close(): Promise<void>;
 }
 
-export async function startListener(): Promise<Listener> {
+export interface ListenerOptions {
+  /**
+   * Bind the local server to a FIXED port instead of an ephemeral one. Required when
+   * a tunnel (e.g. `ngrok http <port>`) forwards to it — the tunnel target must be stable.
+   * Defaults to an OS-assigned port (0), preserving the original behavior (and the drill's).
+   */
+  port?: number;
+  /**
+   * A public URL that reaches this listener through a tunnel. When set, subscriptions are
+   * created with THIS url (so a remote/deployed Ship can deliver), while the server still
+   * binds locally. Without it, the local `http://127.0.0.1:<port>/` url is used.
+   */
+  publicUrl?: string;
+}
+
+export async function startListener(opts: ListenerOptions = {}): Promise<Listener> {
   const callbacks: ((d: ReceivedDelivery) => void)[] = [];
   const waiters: { resolve: (d: ReceivedDelivery) => void }[] = [];
 
@@ -36,12 +54,16 @@ export async function startListener(): Promise<Listener> {
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(opts.port ?? 0, '127.0.0.1', resolve));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
+  const localUrl = `http://127.0.0.1:${port}/`;
+  // Normalize the public url to a single trailing slash so it matches the local url shape.
+  const url = opts.publicUrl ? `${opts.publicUrl.replace(/\/+$/, '')}/` : localUrl;
 
   return {
-    url: `http://127.0.0.1:${port}/`,
+    url,
+    localUrl,
     port,
     onDelivery: (cb) => callbacks.push(cb),
     waitFor: (timeoutMs) =>
