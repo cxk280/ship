@@ -39,6 +39,21 @@ export {
   parseSignatureHeader,
   SHIP_SIGNATURE_HEADER,
 } from './webhooks/verify.js';
+export {
+  parseWebhookEvent,
+  KNOWN_EVENT_TYPES,
+  type ShipWebhookEvent,
+  type KnownWebhookEventType,
+  type DocumentCreatedData,
+  type DocumentUpdatedData,
+  type DocumentDeletedData,
+  type IssueCreatedData,
+  type IssueAssignedData,
+  type IssueStatusChangedData,
+  type SprintStartedData,
+  type SprintCompletedData,
+} from './webhooks/events.js';
+export type { RequestOptions } from './http.js';
 export type {
   ShipUser,
   MeResponse,
