@@ -16,11 +16,19 @@ import dns from 'node:dns';
 import { signPayload, signPayloadEd25519, SHIP_SIGNATURE_ED25519_HEADER } from './signer.js';
 import type { Clock } from './clock.js';
 import type { WebhookEnvelope } from './events.js';
-import { updateDeliveryAttempt } from './store.js';
+import { updateDeliveryAttempt, recordDeliveryFailure, recordDeliverySuccess } from './store.js';
 import { assertPublicHttpUrl, allowPrivateTargets, isPrivateIp } from './url-guard.js';
 
 export const RETRY_DELAYS_MS = [1000, 4000, 16000, 60_000, 300_000, 1_800_000];
 export const MAX_ATTEMPTS = 6;
+
+/**
+ * Number of consecutive permanent delivery failures before a subscription is
+ * auto-disabled.  A "permanent failure" is either a dead-lettered delivery
+ * (all retry attempts exhausted) or a non-transient 4xx that skips retries
+ * entirely.  Successful deliveries reset the counter to 0.
+ */
+export const AUTO_DISABLE_THRESHOLD = 15;
 
 export interface TransportResult {
   status: number;
@@ -172,6 +180,8 @@ export class QueueWebhookDeliverer implements IWebhookDeliverer {
         responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency,
         nextAttemptAt: null, deliveredAt: new Date(this.deps.clock.now()),
       });
+      // Reset consecutive failure counter on success.
+      await recordDeliverySuccess(job.subscription.id);
       return;
     }
 
@@ -182,6 +192,8 @@ export class QueueWebhookDeliverer implements IWebhookDeliverer {
         attemptNumber: n, status: 'dead', responseStatus: result.status,
         responseExcerpt: result.bodyExcerpt ?? null, latencyMs: latency, nextAttemptAt: null,
       });
+      // Increment consecutive failure counter; auto-disable if threshold reached.
+      await recordDeliveryFailure(job.subscription.id, AUTO_DISABLE_THRESHOLD);
       return;
     }
 

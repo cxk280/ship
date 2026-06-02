@@ -10,6 +10,7 @@
  *   GET  /api/oauth/portal/apps/:appId/audit           — API call audit log for an app (last 50)
  *   GET  /api/oauth/portal/apps/:appId/signing-keys    — Ed25519 public key(s) for an app (active + retiring)
  *   POST /api/oauth/portal/deliveries/:deliveryId/replay — replay a delivery
+ *   POST /api/oauth/portal/apps/:appId/subscriptions/:subId/test — send a synthetic test event
  */
 import { Router, type Request, type Response } from 'express';
 import { ERROR_CODES, HTTP_STATUS } from '@ship/shared';
@@ -90,6 +91,35 @@ export function createPortalRouter(): RouterT {
 
     const keys = await getPublicKeys(app.id);
     res.json({ success: true, data: keys });
+  });
+
+  // POST /api/oauth/portal/apps/:appId/subscriptions/:subId/test
+  // Sends a synthetic signed test event to the subscription's target URL and
+  // returns the delivery record (so the portal can show the HTTP response).
+  router.post('/apps/:appId/subscriptions/:subId/test', async (req: Request, res: Response): Promise<void> => {
+    const app = await resolveOwnedApp(req, res, String(req.params.appId));
+    if (!app) return;
+
+    // Verify the subscription belongs to this app.
+    const sub = await getSubscription(String(req.params.subId));
+    if (!sub || sub.app_id !== app.id) {
+      res.status(HTTP_STATUS.NOT_FOUND).json({
+        success: false,
+        error: { code: ERROR_CODES.NOT_FOUND, message: 'Subscription not found' },
+      });
+      return;
+    }
+
+    const delivery = await getPortalEventBus().sendTestEvent(sub.id);
+    if (!delivery) {
+      res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({
+        success: false,
+        error: { code: 'TEST_EVENT_FAILED', message: 'Failed to enqueue test event' },
+      });
+      return;
+    }
+
+    res.json({ success: true, data: delivery });
   });
 
   // POST /api/oauth/portal/deliveries/:deliveryId/replay
@@ -175,4 +205,13 @@ export function getPortalEventBus(): InMemoryEventBus {
     });
   }
   return _portalBus;
+}
+
+/**
+ * Override the portal event bus — used by tests to inject a bus backed by a
+ * deterministic fake transport (no real HTTP).  Should be called in
+ * beforeAll before any route is exercised.
+ */
+export function setPortalEventBusForTest(bus: InMemoryEventBus): void {
+  _portalBus = bus;
 }

@@ -13,6 +13,9 @@ export interface SubscriptionRow {
   signing_secret: string;
   active: boolean;
   created_at: string;
+  consecutive_failures: number;
+  disabled_reason: string | null;
+  last_failure_at: string | null;
 }
 
 export interface DeliveryRow {
@@ -73,6 +76,51 @@ export async function getSubscription(id: string): Promise<SubscriptionRow | nul
 
 export async function deactivateSubscription(id: string): Promise<void> {
   await pool.query('UPDATE webhook_subscriptions SET active = FALSE, updated_at = now() WHERE id = $1', [id]);
+}
+
+/**
+ * Called on every permanent delivery failure (dead-lettered or 4xx).
+ * Increments consecutive_failures + sets last_failure_at.
+ * If the new count >= threshold, auto-disables the subscription.
+ * Returns the updated subscription row so callers can inspect the result.
+ */
+export async function recordDeliveryFailure(
+  subscriptionId: string,
+  threshold: number,
+): Promise<SubscriptionRow | null> {
+  const r = await pool.query(
+    `UPDATE webhook_subscriptions
+        SET consecutive_failures = consecutive_failures + 1,
+            last_failure_at = now(),
+            active = CASE
+              WHEN consecutive_failures + 1 >= $2 THEN FALSE
+              ELSE active
+            END,
+            disabled_reason = CASE
+              WHEN consecutive_failures + 1 >= $2 AND active = TRUE
+                THEN 'auto-disabled after ' || ($2)::text || ' consecutive delivery failures'
+              ELSE disabled_reason
+            END,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [subscriptionId, threshold],
+  );
+  return (r.rows[0] as SubscriptionRow) ?? null;
+}
+
+/**
+ * Called on a successful delivery.  Resets the consecutive_failures counter
+ * (but does NOT re-enable a subscription that was auto-disabled — that is an
+ * explicit operator action).
+ */
+export async function recordDeliverySuccess(subscriptionId: string): Promise<void> {
+  await pool.query(
+    `UPDATE webhook_subscriptions
+        SET consecutive_failures = 0, updated_at = now()
+      WHERE id = $1`,
+    [subscriptionId],
+  );
 }
 
 /** Active subscriptions whose app is in the event's workspace. */
