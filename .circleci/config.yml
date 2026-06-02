@@ -227,7 +227,13 @@ workflows:
           name: deploy_dev
           railway_environment: dev
           railway_token_env: RAILWAY_TOKEN_DEV
-          requires: [install_build, eval_deterministic, test_integration, eval_llm, ttfe_drill, perf_regression, openapi_breaking]
+          # Deploy gates on the DETERMINISTIC build/test/platform jobs only. The LLM
+          # evals (eval_llm) are non-deterministic and depend on external Anthropic
+          # credits + LangSmith quota — gating deploys on them means "no credits = no
+          # deploys", which had silently blocked every deploy. The platform does zero
+          # AI work, so its deploy must not hinge on the agent's eval credits. eval_llm
+          # still runs as an informational signal.
+          requires: [install_build, eval_deterministic, test_integration, ttfe_drill, perf_regression, openapi_breaking]
           filters:
             branches:
               only: master

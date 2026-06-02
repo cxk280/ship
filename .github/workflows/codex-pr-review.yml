@@ -235,4 +235,4 @@ jobs:
           fi
 
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "@cursor fix the Codex review comments"
+            --body "@cursor fix the Codex review comments. Commit the fixes directly to THIS pull request's branch — do not open a separate pull request."
