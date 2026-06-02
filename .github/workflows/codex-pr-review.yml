@@ -174,5 +174,45 @@ jobs:
 
             core.setOutput('event', event);
 
-      # NOTE: the "@cursor fix" ping lives ONLY in codex-cursor-handoff.yml (which
-      # reacts to the submitted review). Pinging here too double-triggered Cursor.
+      - name: Ping Cursor to auto-fix when changes are requested
+        if: steps.submit_review.outputs.event == 'REQUEST_CHANGES'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Post the "@cursor fix" ping INLINE from this same run.
+            //
+            // Why not a separate pull_request_review-triggered workflow (the old
+            // codex-cursor-handoff.yml)? Codex's review is submitted with the default
+            // GITHUB_TOKEN, and GitHub intentionally does NOT trigger downstream
+            // workflows from GITHUB_TOKEN-generated events (loop prevention). So that
+            // handoff workflow could never fire, and the ping was never sent. Cursor
+            // is an EXTERNAL GitHub App, so it still receives this comment's webhook
+            // and acts on the mention — pinging inline is reliable.
+            const pr = context.payload.pull_request.number;
+            const MAX_ROUNDS = 8;
+            // Stop the loop once Cursor has already pushed MAX_ROUNDS fix commits.
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr,
+            });
+            const cursorCommits = commits.filter(
+              (c) =>
+                /cursor/i.test(c.author?.login || '') ||
+                /cursor/i.test(c.commit?.author?.name || ''),
+            ).length;
+            if (cursorCommits >= MAX_ROUNDS) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                body: `⚠️ Cursor has already auto-fixed this PR ${cursorCommits} times (cap: ${MAX_ROUNDS}). Stopping the auto-fix loop — a human should review the remaining Codex findings.`,
+              });
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr,
+              body: '@cursor fix the Codex review comments',
+            });
