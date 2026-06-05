@@ -216,9 +216,13 @@ jobs:
     resource_class: large
     environment:
       NODE_ENV: test
-      # The machine has 4 vCPU / 15 GB; cap workers so the per-worker stack
-      # (Postgres container + API + vite preview + Chromium) stays well within RAM.
-      PLAYWRIGHT_WORKERS: "2"
+      # Run the suite single-worker. At 2 workers the per-worker stack (Postgres
+      # container + API + vite preview + Chromium) contends for the machine's
+      # 4 vCPU and starves timing-sensitive editor/collaboration/upload tests,
+      # which then flake (they pass uncontended locally — 111/114). 1 worker
+      # trades wall-clock for determinism; the `list` reporter streams per-test
+      # so the no_output_timeout (25m) never trips during the longer run.
+      PLAYWRIGHT_WORKERS: "1"
     steps:
       - checkout
       - run:
