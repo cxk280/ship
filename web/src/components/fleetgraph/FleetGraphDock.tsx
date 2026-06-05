@@ -272,7 +272,6 @@ export function FleetGraphDock() {
           onClick={() => setPanel(panel === 'inbox' ? null : 'inbox')}
           className="relative flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background shadow-lg hover:bg-muted"
           aria-label="FleetGraph notifications"
-          title="FleetGraph notifications"
         >
           <BellIcon />
           {unread > 0 && (
@@ -285,7 +284,6 @@ export function FleetGraphDock() {
           onClick={() => setPanel(panel === 'chat' ? null : 'chat')}
           className="flex h-11 w-11 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg hover:opacity-90"
           aria-label="Ask FleetGraph"
-          title="Ask FleetGraph"
         >
           <ChatIcon />
         </button>
