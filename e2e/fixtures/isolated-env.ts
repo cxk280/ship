@@ -175,6 +175,14 @@ export const test = base.extend<
           NODE_ENV: 'test',
           // Prevent dotenv from overriding our DATABASE_URL
           DOTENV_CONFIG_PATH: '/dev/null',
+          // The e2e API server must not emit LangSmith traces or make LLM calls:
+          // inheriting CI's LANGCHAIN_* creds made every request ship traces and
+          // hit the monthly quota ("429 ... Monthly unique traces usage limit
+          // exceeded"), adding per-request latency/retries. Match the other CI
+          // jobs (test_integration/ttfe/perf) which disable both.
+          LANGCHAIN_TRACING_V2: 'false',
+          LANGCHAIN_TRACING: 'false',
+          FLEETGRAPH_DISABLE_LLM: '1',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
