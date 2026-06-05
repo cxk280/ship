@@ -296,16 +296,17 @@ async function runMigrations(dbUrl: string): Promise<void> {
 
     // Step 3: Mark/apply migrations.
     //
-    // schema.sql covers the PRE-platform tables (001–039 era): those already exist
+    // schema.sql covers the PRE-FleetGraph tables (001–038 era): those already exist
     // after schema.sql ran, so we only MARK those migrations applied (re-running them
     // would fail on CREATE TABLE without IF NOT EXISTS).
     //
-    // The Plugforge platform tables (oauth_*, webhook_*) live ONLY in migrations 040+
-    // and are NOT in schema.sql, so we must actually RUN those so the e2e database has
-    // the OAuth/webhook schema (and the seeded grader/SPA/CLI/agent apps). This is what
-    // lets platform features (OAuth consent, /api/v1, webhooks) be exercised in browser
-    // e2e tests. All 040+ migrations are idempotent-or-additive and FK-safe on a fresh DB.
-    const PLATFORM_MIGRATION_FLOOR = '040';
+    // From 039 on we actually RUN the migration, because those tables are NOT in
+    // schema.sql: 039 adds the FleetGraph tables (fleetgraph_findings,
+    // fleetgraph_pending_approvals) and 040+ add the Plugforge platform tables
+    // (oauth_*, webhook_*). Without running 039 the FleetGraph inbox query 500s on
+    // every page load (relation "fleetgraph_findings" does not exist). All of these
+    // migrations are additive / `IF NOT EXISTS` and FK-safe on a fresh schema.sql DB.
+    const PLATFORM_MIGRATION_FLOOR = '039';
     const migrationsDir = path.join(PROJECT_ROOT, 'api/src/db/migrations');
     let migrationFiles: string[] = [];
 
