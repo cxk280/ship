@@ -3,6 +3,7 @@
  * Handles paste/drop events for images and manages upload flow
  */
 import { Extension } from '@tiptap/core';
+import { clickFileInput } from './clickFileInput';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Editor } from '@tiptap/react';
@@ -236,5 +237,5 @@ export function triggerImageUpload(
     });
   };
 
-  input.click();
+  clickFileInput(input);
 }
