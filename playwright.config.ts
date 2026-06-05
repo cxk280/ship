@@ -61,10 +61,17 @@ export default defineConfig({
   workers: calculatedWorkers,
   // Reporters:
   // - 'line' shows real-time progress: [1/641] ✓ auth.spec.ts:15 (2.3s)
-  // - 'html' generates detailed report at end
+  // - 'github' annotates failures inline on the CircleCI/GitHub diff
+  // - 'junit' feeds CircleCI's native test-results UI (store_test_results)
+  // - 'html' generates detailed report at end (stored as a CI artifact)
   // - './e2e/progress-reporter.ts' writes JSONL for live monitoring
   reporter: process.env.CI
-    ? [['github'], ['html', { open: 'never' }], ['./e2e/progress-reporter.ts']]
+    ? [
+        ['github'],
+        ['junit', { outputFile: 'test-results/junit.xml' }],
+        ['html', { open: 'never' }],
+        ['./e2e/progress-reporter.ts'],
+      ]
     : [['line'], ['html', { open: 'never' }], ['./e2e/progress-reporter.ts']],
   use: {
     // baseURL is provided by the isolated-env fixture
