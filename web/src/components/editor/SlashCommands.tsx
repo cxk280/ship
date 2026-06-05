@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core';
+import { clickFileInput } from './clickFileInput';
 import { ReactRenderer } from '@tiptap/react';
 import Suggestion, { SuggestionOptions } from '@tiptap/suggestion';
 import tippy, { Instance as TippyInstance } from 'tippy.js';
@@ -429,7 +430,7 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
           };
           reader.readAsDataURL(file);
         };
-        input.click();
+        clickFileInput(input);
       },
     },
     // File attachment
