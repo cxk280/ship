@@ -270,16 +270,23 @@ jobs:
           # testcontainers Postgres, API server, and vite preview. forbidOnly +
           # 2 retries are already set for CI in playwright.config.ts.
           command: pnpm test:e2e
+      # `when: always` is ESSENTIAL: a failing `pnpm test:e2e` exits non-zero, and
+      # without it CircleCI skips these steps — so on the exact runs we most need
+      # diagnostics (red suite), we'd capture none. With it, the JUnit + HTML
+      # report + traces are always uploaded.
       - store_test_results:
           # JUnit XML (emitted only in CI) drives CircleCI's test-results tab so
           # individual E2E failures are visible without opening artifacts.
           path: test-results/junit.xml
+          when: always
       - store_artifacts:
           path: playwright-report
           destination: playwright-report
+          when: always
       - store_artifacts:
           path: test-results
           destination: e2e-test-results
+          when: always
 
   deploy_railway:
     parameters:
