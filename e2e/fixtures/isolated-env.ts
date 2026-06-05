@@ -20,7 +20,10 @@ import { spawn, ChildProcess } from 'child_process';
 import { Pool } from 'pg';
 import { readdirSync, readFileSync, existsSync } from 'fs';
 import path from 'path';
-import getPort, { portNumbers } from 'get-port';
+// get-port@7 is ESM-only. Playwright loads this fixture as CommonJS, and Node 20
+// (CI) forbids `require()` of an ES module — it only "works" on Node 22+/23 where
+// require(ESM) is allowed. Import it dynamically instead (import() of ESM is
+// always permitted from CJS), so the suite loads on the CI Node version too.
 import bcrypt from 'bcryptjs';
 import os from 'os';
 
@@ -46,6 +49,7 @@ async function getWorkerPort(workerIndex: number): Promise<number> {
   const startPort = BASE_PORT + wrappedIndex * PORTS_PER_WORKER;
   const endPort = Math.min(startPort + PORTS_PER_WORKER - 1, MAX_PORT);
 
+  const { default: getPort, portNumbers } = await import('get-port');
   return getPort({ port: portNumbers(startPort, endPort) });
 }
 
