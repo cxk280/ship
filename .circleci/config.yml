@@ -205,6 +205,75 @@ jobs:
           name: OpenAPI breaking-change gate (oasdiff vs origin/master)
           command: bash scripts/openapi-breaking-check.sh
 
+  test_e2e:
+    # Enforced E2E quality gate: the full Playwright suite runs the real built
+    # app (API + Vite preview) against a per-worker PostgreSQL container and must
+    # pass before any deploy. Runs on the `machine` executor (not `docker`)
+    # because the suite uses testcontainers — those need a local Docker daemon
+    # on localhost, which setup_remote_docker (remote host) cannot provide.
+    machine:
+      image: ubuntu-2204:2024.05.1
+    resource_class: large
+    environment:
+      NODE_ENV: test
+      # The machine has 4 vCPU / 15 GB; cap workers so the per-worker stack
+      # (Postgres container + API + vite preview + Chromium) stays well within RAM.
+      PLAYWRIGHT_WORKERS: "2"
+    steps:
+      - checkout
+      - run:
+          name: Use Node 20 (persist across steps via $BASH_ENV)
+          command: |
+            nvm install 20.18
+            nvm alias default 20.18
+            {
+              echo 'export NVM_DIR="$HOME/.nvm"'
+              echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
+              echo 'nvm use 20.18 >/dev/null'
+            } >> "$BASH_ENV"
+      - run:
+          name: Install pnpm
+          command: npm install -g pnpm@10.27.0
+      - restore_cache:
+          keys:
+            - pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+      - run:
+          name: Install dependencies
+          command: pnpm install --frozen-lockfile
+      - save_cache:
+          key: pnpm-v1-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.local/share/pnpm/store
+      - run:
+          name: Build shared + sdk (api/web resolve @ship/shared and @ship/sdk)
+          command: pnpm build:shared && pnpm --filter @ship/sdk build
+      - restore_cache:
+          keys:
+            - playwright-browsers-v1-{{ checksum "pnpm-lock.yaml" }}
+      - run:
+          name: Install Playwright Chromium + OS deps
+          command: pnpm exec playwright install --with-deps chromium
+      - save_cache:
+          key: playwright-browsers-v1-{{ checksum "pnpm-lock.yaml" }}
+          paths:
+            - ~/.cache/ms-playwright
+      - run:
+          name: End-to-end tests (Playwright — built app + per-worker Postgres container)
+          # global-setup builds api + web once; each worker spins its own
+          # testcontainers Postgres, API server, and vite preview. forbidOnly +
+          # 2 retries are already set for CI in playwright.config.ts.
+          command: pnpm test:e2e
+      - store_test_results:
+          # JUnit XML (emitted only in CI) drives CircleCI's test-results tab so
+          # individual E2E failures are visible without opening artifacts.
+          path: test-results/junit.xml
+      - store_artifacts:
+          path: playwright-report
+          destination: playwright-report
+      - store_artifacts:
+          path: test-results
+          destination: e2e-test-results
+
   deploy_railway:
     parameters:
       railway_environment:
@@ -244,6 +313,8 @@ workflows:
           requires: [install_build]
       - openapi_breaking:
           requires: [install_build]
+      - test_e2e:
+          requires: [install_build]
       - deploy_railway:
           name: deploy_dev
           railway_environment: dev
@@ -254,7 +325,7 @@ workflows:
           # deploys", which had silently blocked every deploy. The platform does zero
           # AI work, so its deploy must not hinge on the agent's eval credits. eval_llm
           # still runs as an informational signal.
-          requires: [install_build, eval_deterministic, test_integration, ttfe_drill, perf_regression, openapi_breaking]
+          requires: [install_build, eval_deterministic, test_integration, ttfe_drill, perf_regression, openapi_breaking, test_e2e]
           filters:
             branches:
               only: master
