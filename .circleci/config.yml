@@ -224,10 +224,17 @@ jobs:
       - run:
           name: Use Node 20 (persist across steps via $BASH_ENV)
           command: |
+            # CircleCI machine images ship nvm under /opt/circleci/.nvm — NOT
+            # $HOME/.nvm. Detect the real dir so every later step's $BASH_ENV
+            # sources the same nvm the install used.
+            NVM_DIR="${NVM_DIR:-/opt/circleci/.nvm}"
+            [ -s "$NVM_DIR/nvm.sh" ] || NVM_DIR="$HOME/.nvm"
+            export NVM_DIR
+            . "$NVM_DIR/nvm.sh"
             nvm install 20.18
             nvm alias default 20.18
             {
-              echo 'export NVM_DIR="$HOME/.nvm"'
+              echo "export NVM_DIR=\"$NVM_DIR\""
               echo '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"'
               echo 'nvm use 20.18 >/dev/null'
             } >> "$BASH_ENV"
