@@ -67,6 +67,11 @@ export default defineConfig({
   // - './e2e/progress-reporter.ts' writes JSONL for live monitoring
   reporter: process.env.CI
     ? [
+        // 'list' streams a line per test as it finishes. Without a streaming
+        // reporter the run is silent mid-suite (github only annotates at the
+        // end), so CircleCI's no-output timeout killed the step ~halfway. Keep
+        // 'list' first so stdout flows continuously.
+        ['list'],
         ['github'],
         ['junit', { outputFile: 'test-results/junit.xml' }],
         ['html', { open: 'never' }],
