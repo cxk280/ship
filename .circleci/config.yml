@@ -285,6 +285,13 @@ jobs:
           # global-setup builds api + web once; each worker spins its own
           # testcontainers Postgres, API server, and vite preview. forbidOnly +
           # 2 retries are already set for CI in playwright.config.ts.
+          #
+          # no_output_timeout: the CI reporters used to be silent mid-run (github
+          # only annotates at the end), so a long test batch produced no stdout
+          # and CircleCI killed the step at its 10m default — truncating the
+          # suite (~386/871 ran). The `list` reporter (added in CI) now streams
+          # per-test output; this raised ceiling is a safety net for slow batches.
+          no_output_timeout: 25m
           command: pnpm test:e2e
       # `when: always` is ESSENTIAL: a failing `pnpm test:e2e` exits non-zero, and
       # without it CircleCI skips these steps — so on the exact runs we most need
