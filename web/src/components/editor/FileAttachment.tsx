@@ -4,6 +4,7 @@
  * Supports drag-and-drop and paste for non-image files
  */
 import { Node, mergeAttributes } from '@tiptap/core';
+import { clickFileInput } from './clickFileInput';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import { uploadFile, isAllowedFileType, getMimeTypeFromExtension, isImageFile, MAX_FILE_SIZE, MAX_FILE_SIZE_DISPLAY } from '@/services/upload';
@@ -353,5 +354,5 @@ export function triggerFileUpload(editor: any, signal?: AbortSignal) {
     await handleFileUpload(editor, file, signal);
   };
 
-  input.click();
+  clickFileInput(input);
 }
