@@ -254,6 +254,22 @@ jobs:
       - run:
           name: Build shared + sdk (api/web resolve @ship/shared and @ship/sdk)
           command: pnpm build:shared && pnpm --filter @ship/sdk build
+      - run:
+          name: Make apt non-interactive (suppress needrestart service-restart prompt)
+          # `playwright install --with-deps` runs `sudo apt-get`, which on the
+          # ubuntu-2204 machine image triggers needrestart's interactive whiptail
+          # "Which services should be restarted?" dialog. With no TTY to answer,
+          # the step hangs until CircleCI's 10-minute no-output timeout kills it
+          # (the suite never even starts). Force needrestart to auto-restart and
+          # apt to noninteractive so the install runs unattended.
+          command: |
+            sudo mkdir -p /etc/needrestart/conf.d
+            printf '$nrconf{restart} = "a";\n$nrconf{kernelhints} = 0;\n' | sudo tee /etc/needrestart/conf.d/99-ci.conf >/dev/null
+            {
+              echo 'export DEBIAN_FRONTEND=noninteractive'
+              echo 'export NEEDRESTART_MODE=a'
+              echo 'export NEEDRESTART_SUSPEND=1'
+            } >> "$BASH_ENV"
       - restore_cache:
           keys:
             - playwright-browsers-v1-{{ checksum "pnpm-lock.yaml" }}
