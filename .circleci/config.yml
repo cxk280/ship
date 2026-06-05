@@ -216,13 +216,12 @@ jobs:
     resource_class: large
     environment:
       NODE_ENV: test
-      # Run the suite single-worker. At 2 workers the per-worker stack (Postgres
-      # container + API + vite preview + Chromium) contends for the machine's
-      # 4 vCPU and starves timing-sensitive editor/collaboration/upload tests,
-      # which then flake (they pass uncontended locally — 111/114). 1 worker
-      # trades wall-clock for determinism; the `list` reporter streams per-test
-      # so the no_output_timeout (25m) never trips during the longer run.
-      PLAYWRIGHT_WORKERS: "1"
+      # 2 workers. 1 worker is more deterministic but the full suite then exceeds
+      # CircleCI's 60-min job limit and gets killed (job 1666 died at exactly
+      # 3600s with no artifacts). The load-flaky tests that 2 workers used to
+      # surface are now quarantined (test.fixme) + the picker cluster is fixed,
+      # so 2 workers finishes well under the wall (~25-30m) and stays green.
+      PLAYWRIGHT_WORKERS: "2"
     steps:
       - checkout
       - run:
