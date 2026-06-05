@@ -183,6 +183,12 @@ export const test = base.extend<
           LANGCHAIN_TRACING_V2: 'false',
           LANGCHAIN_TRACING: 'false',
           FLEETGRAPH_DISABLE_LLM: '1',
+          // The collaboration server caps WebSocket handshakes at 30/min/IP. The
+          // whole suite connects /events + /collaboration from one loopback IP
+          // and, when run fast (CI), blows past that — the limiter then 429s the
+          // real-time channel and breaks upload-progress/live tests. Raise it for
+          // tests (single trusted client); production keeps the default.
+          COLLAB_MAX_CONNECTIONS_PER_IP: '100000',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });

@@ -18,9 +18,12 @@ const messageClearCache = 3; // Tells browser to clear IndexedDB cache before sy
 
 // Rate limiting configuration
 const RATE_LIMIT = {
-  // Connection rate limiting: max connections per IP in time window
+  // Connection rate limiting: max connections per IP in time window.
   CONNECTION_WINDOW_MS: 60_000,  // 1 minute window
-  MAX_CONNECTIONS_PER_IP: 30,    // 30 connections per minute per IP
+  // 30/min/IP in production. Overridable via env because the e2e suite drives
+  // many rapid /events + /collaboration handshakes from a single loopback IP
+  // (127.0.0.1) and would otherwise self-429 — the fixture sets a high value.
+  MAX_CONNECTIONS_PER_IP: Number(process.env.COLLAB_MAX_CONNECTIONS_PER_IP) || 30,
   // Message rate limiting: max messages per connection in time window
   MESSAGE_WINDOW_MS: 1_000,      // 1 second window
   MAX_MESSAGES_PER_SECOND: 50,   // 50 messages per second per connection
