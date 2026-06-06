@@ -32,13 +32,18 @@ test.describe('Drag Handle - Block Reordering', () => {
 
     for (let i = 0; i < texts.length; i++) {
       await page.keyboard.type(texts[i])
+      // Typed text may contain '@' or '/', which open the mention/slash-command
+      // popup. Dismiss it so the next Enter creates a new block instead of
+      // accepting a suggestion — which would silently merge two paragraphs into
+      // one and leave only a single <p> (a classic intermittent drag-test flake).
+      await page.keyboard.press('Escape')
       if (i < texts.length - 1) {
         await page.keyboard.press('Enter')
       }
     }
 
-    // Wait for content to be rendered
-    await page.waitForTimeout(300)
+    // Wait for every paragraph to actually render before anyone drags them
+    await expect(editor.locator('p')).toHaveCount(texts.length, { timeout: 5000 })
   }
 
   // Helper to get paragraph texts in order (excludes collaboration cursor labels and empty paragraphs)
@@ -75,9 +80,11 @@ test.describe('Drag Handle - Block Reordering', () => {
     const dragHandleLocator = page.locator('.editor-drag-handle')
     await expect(dragHandleLocator).toBeVisible({ timeout: 2000 })
 
-    // Use $ to get element handles for dispatchEvent
+    // Use element handles for dispatchEvent. Target the Nth <p> via the locator
+    // (counts only paragraphs) rather than CSS :nth-child (counts ALL siblings,
+    // so it breaks if ProseMirror has a non-<p> child at that position).
     const dragHandle = await page.$('.editor-drag-handle')
-    const targetPara = await page.$(`.ProseMirror p:nth-child(${targetIndex + 1})`)
+    const targetPara = await paragraphs.nth(targetIndex).elementHandle()
     const editor = await page.$('.ProseMirror')
 
     if (!dragHandle || !targetPara || !editor) {
@@ -299,7 +306,11 @@ test.describe('Drag Handle - Block Reordering', () => {
   test.describe('Content Preservation', () => {
     test('drag preserves full paragraph content', async ({ page }) => {
       await createNewDocument(page)
-      const longContent = 'This is a longer paragraph with multiple words and some special chars: @#$%'
+      // Special chars deliberately EXCLUDE '@' and '/': those open the mention /
+      // slash-command popup, and a following Enter can accept a suggestion instead
+      // of splitting the block — merging the two paragraphs into one. That's a
+      // mention/slash concern, not a drag concern, so it doesn't belong here.
+      const longContent = 'This is a longer paragraph with multiple words and some special chars: #$%^&*()!?'
       await addParagraphs(page, [longContent, 'Second block'])
 
       // Drag first to after second
