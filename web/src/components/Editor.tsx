@@ -28,8 +28,8 @@ import { createSlashCommands } from './editor/SlashCommands';
 import { DocumentEmbed } from './editor/DocumentEmbed';
 import { DragHandleExtension } from './editor/DragHandle';
 import { createMentionExtension } from './editor/MentionExtension';
-import { ImageUploadExtension } from './editor/ImageUpload';
-import { FileAttachmentExtension } from './editor/FileAttachment';
+import { ImageUploadExtension, handleImageUpload } from './editor/ImageUpload';
+import { FileAttachmentExtension, handleFileUpload } from './editor/FileAttachment';
 import { DetailsExtension, DetailsSummary, DetailsContent } from './editor/DetailsExtension';
 import { EmojiExtension } from './editor/EmojiExtension';
 import { TableOfContentsExtension } from './editor/TableOfContents';
@@ -237,6 +237,14 @@ export function Editor({
   // AbortController for cancelling async uploads (images, files) when navigating away
   // This prevents uploads from completing into a different document after navigation
   const imageUploadAbortRef = useRef<AbortController>(new AbortController());
+
+  // Persistent hidden file inputs for image/file uploads. Mounting them in the
+  // DOM (instead of creating throwaway inputs on demand) opens the native picker
+  // reliably for real users AND lets E2E tests drive uploads via Playwright's
+  // setInputFiles() — bypassing the OS file-chooser dialog, which never fires in
+  // headless-Linux CI.
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Find portal target for properties sidebar (for proper landmark order)
   useLayoutEffect(() => {
@@ -706,8 +714,24 @@ export function Editor({
     return () => clearTimeout(timer);
   }, [editor, aiScoringAnalysis]);
 
+  // Wire the upload extensions' triggerPicker to the persistent hidden inputs so
+  // slash commands (/image, /file) open the native picker for real users. The
+  // uploads themselves run in the inputs' onChange handlers below.
+  useEffect(() => {
+    if (!editor) return;
+    const imageExt = editor.extensionManager.extensions.find(e => e.name === 'imageUpload');
+    if (imageExt) imageExt.storage.triggerPicker = () => imageInputRef.current?.click();
+    const fileExt = editor.extensionManager.extensions.find(e => e.name === 'fileAttachment');
+    if (fileExt) fileExt.storage.triggerPicker = () => fileInputRef.current?.click();
+  }, [editor]);
+
   // Sync document links when editor content changes (for backlinks feature)
   const lastSyncedLinksRef = useRef<string>('');
+  // Serializes /links POSTs. The endpoint replaces the whole link set, so two
+  // requests in flight (e.g. add-mention then quickly remove it) could otherwise
+  // land out of order and leave a stale backlink. Chaining guarantees the latest
+  // edit wins.
+  const linkSyncChainRef = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     if (!editor) return;
 
@@ -722,12 +746,18 @@ export function Editor({
       }
       lastSyncedLinksRef.current = targetIdsKey;
 
-      // POST to update links (uses target_ids for API compatibility)
-      // Use apiPost to handle CSRF token automatically
-      apiPost(`/api/documents/${documentId}/links`, { target_ids: targetIds })
-        .catch(err => {
-          console.error('[LinkSync] POST error:', err);
-        });
+      // POST to update links (uses target_ids for API compatibility).
+      // Use apiPost to handle CSRF token automatically. Queue behind any in-flight
+      // sync so requests are applied in submission order.
+      linkSyncChainRef.current = linkSyncChainRef.current
+        .catch(() => {})
+        .then(() =>
+          apiPost(`/api/documents/${documentId}/links`, { target_ids: targetIds })
+            .then(() => undefined)
+            .catch(err => {
+              console.error('[LinkSync] POST error:', err);
+            })
+        );
     };
 
     // Debounce during editing
@@ -979,6 +1009,37 @@ export function Editor({
             >
               <ErrorBoundary>
                 <EditorContent editor={editor} />
+                {/* Persistent hidden upload inputs — see imageInputRef/fileInputRef.
+                    Slash commands click these; E2E tests setInputFiles() on them. */}
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  data-testid="image-upload-input"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (!editor) return;
+                    const files = Array.from(e.target.files ?? []);
+                    files.forEach((file) =>
+                      handleImageUpload(editor, file, { abortController: imageUploadAbortRef.current })
+                    );
+                    // Reset so picking the same file again re-fires onChange.
+                    e.target.value = '';
+                  }}
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  data-testid="file-upload-input"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (!editor) return;
+                    const file = e.target.files?.[0];
+                    if (file) handleFileUpload(editor, file, imageUploadAbortRef.current.signal);
+                    e.target.value = '';
+                  }}
+                />
               </ErrorBoundary>
             </div>
             {editor && !editor.isDestroyed && (

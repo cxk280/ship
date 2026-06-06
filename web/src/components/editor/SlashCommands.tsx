@@ -1,5 +1,4 @@
 import { Extension } from '@tiptap/core';
-import { clickFileInput } from './clickFileInput';
 import { ReactRenderer } from '@tiptap/react';
 import Suggestion, { SuggestionOptions } from '@tiptap/suggestion';
 import tippy, { Instance as TippyInstance } from 'tippy.js';
@@ -11,8 +10,6 @@ import {
   useCallback,
 } from 'react';
 import { cn } from '@/lib/cn';
-import { uploadFile } from '@/services/upload';
-import { triggerFileUpload } from './FileAttachment';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '';
 
@@ -258,7 +255,7 @@ const icons = {
   ),
 };
 
-export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument, documentType, abortSignal }: CreateSlashCommandsOptions) {
+export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument, documentType }: CreateSlashCommandsOptions) {
   const slashCommands: SlashCommandItem[] = [
     // Sub-document (requires async callback)
     {
@@ -368,69 +365,12 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
       icon: icons.image,
       command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).run();
-        // Trigger file picker
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = async () => {
-          const file = input.files?.[0];
-          if (!file) return;
-
-          // Create data URL for immediate preview
-          const reader = new FileReader();
-          reader.onload = async () => {
-            // Check if aborted before processing
-            if (abortSignal?.aborted) return;
-
-            const dataUrl = reader.result as string;
-
-            // Insert image with data URL preview
-            editor.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
-
-            try {
-              // Upload and replace with CDN URL
-              const result = await uploadFile(file, undefined, abortSignal);
-
-              // Check if aborted before updating editor
-              if (abortSignal?.aborted) {
-                console.log('Slash command image upload completed but was cancelled - not updating editor');
-                return;
-              }
-
-              // Find and update the image node
-              const { state, view } = editor;
-              let imagePos: number | null = null;
-
-              state.doc.descendants((node: any, pos: number) => {
-                if (node.type.name === 'image' && node.attrs.src === dataUrl) {
-                  imagePos = pos;
-                  return false;
-                }
-                return true;
-              });
-
-              if (imagePos !== null) {
-                const cdnUrl = result.cdnUrl.startsWith('http')
-                  ? result.cdnUrl
-                  : `${API_URL}${result.cdnUrl}`;
-                const transaction = state.tr.setNodeMarkup(imagePos, undefined, {
-                  ...state.doc.nodeAt(imagePos)?.attrs,
-                  src: cdnUrl,
-                });
-                view.dispatch(transaction);
-              }
-            } catch (error) {
-              // Don't report cancellation as an error - it's intentional
-              if (error instanceof DOMException && error.name === 'AbortError') {
-                console.log('Slash command image upload cancelled');
-                return;
-              }
-              console.error('Image upload failed:', error);
-            }
-          };
-          reader.readAsDataURL(file);
-        };
-        clickFileInput(input);
+        // Open the persistent hidden image <input> mounted by the Editor
+        // component. The upload itself runs in that input's onChange handler
+        // (handleImageUpload), with the editor's AbortController. Routing
+        // through one DOM-attached input keeps the flow testable via
+        // Playwright's setInputFiles() in headless CI.
+        editor.storage.imageUpload?.triggerPicker?.();
       },
     },
     // File attachment
@@ -439,9 +379,10 @@ export function createSlashCommands({ onCreateSubDocument, onNavigateToDocument,
       description: 'Upload a file attachment',
       aliases: ['file', 'attachment', 'attach', 'pdf', 'doc', 'document'],
       icon: icons.file,
-      command: async ({ editor, range }) => {
+      command: ({ editor, range }) => {
         editor.chain().focus().deleteRange(range).run();
-        triggerFileUpload(editor, abortSignal);
+        // Open the persistent hidden file <input> mounted by the Editor component.
+        editor.storage.fileAttachment?.triggerPicker?.();
       },
     },
     // Toggle/Details

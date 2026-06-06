@@ -4,7 +4,6 @@
  * Supports drag-and-drop and paste for non-image files
  */
 import { Node, mergeAttributes } from '@tiptap/core';
-import { clickFileInput } from './clickFileInput';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import { uploadFile, isAllowedFileType, getMimeTypeFromExtension, isImageFile, MAX_FILE_SIZE, MAX_FILE_SIZE_DISPLAY } from '@/services/upload';
@@ -85,12 +84,28 @@ function FileAttachmentComponent({ node }: { node: any }) {
   );
 }
 
-export const FileAttachmentExtension = Node.create({
+export interface FileAttachmentStorage {
+  /**
+   * Opens the file picker. Wired up by the Editor component to click a
+   * persistent hidden <input> (see Editor.tsx) so E2E tests can drive uploads
+   * via Playwright's setInputFiles() rather than the native file-chooser
+   * dialog, which never fires in headless-Linux CI. Null until the editor mounts.
+   */
+  triggerPicker: (() => void) | null;
+}
+
+export const FileAttachmentExtension = Node.create<unknown, FileAttachmentStorage>({
   name: 'fileAttachment',
 
   group: 'block',
 
   atom: true,
+
+  addStorage() {
+    return {
+      triggerPicker: null,
+    };
+  },
 
   addAttributes() {
     return {
@@ -201,7 +216,7 @@ export const FileAttachmentExtension = Node.create({
  * @param file - File to upload
  * @param signal - Optional AbortSignal for cancelling uploads on navigation/cleanup
  */
-async function handleFileUpload(editor: any, file: File, signal?: AbortSignal) {
+export async function handleFileUpload(editor: any, file: File, signal?: AbortSignal) {
   // Check if already aborted
   if (signal?.aborted) {
     return;
@@ -324,35 +339,4 @@ async function handleFileUpload(editor: any, file: File, signal?: AbortSignal) {
       view.dispatch(transaction);
     }
   }
-}
-
-/**
- * Trigger file picker for file upload
- * @param editor - TipTap editor instance
- * @param signal - Optional AbortSignal for cancelling uploads on navigation/cleanup
- */
-export function triggerFileUpload(editor: any, signal?: AbortSignal) {
-  // Check if already aborted
-  if (signal?.aborted) {
-    return;
-  }
-
-  const input = document.createElement('input');
-  input.type = 'file';
-  // No accept restriction - allow any file type (blocklist enforced in isAllowedFileType)
-  input.multiple = false;
-
-  input.onchange = async () => {
-    // Check if aborted while file picker was open
-    if (signal?.aborted) {
-      return;
-    }
-
-    const file = input.files?.[0];
-    if (!file) return;
-
-    await handleFileUpload(editor, file, signal);
-  };
-
-  clickFileInput(input);
 }

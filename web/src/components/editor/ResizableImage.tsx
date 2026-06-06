@@ -6,7 +6,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     image: {
-      setImage: (options: { src: string; alt?: string; title?: string; width?: number }) => ReturnType;
+      setImage: (options: { src: string; alt?: string; title?: string; width?: number; uploadId?: string }) => ReturnType;
     };
   }
 }
@@ -108,6 +108,15 @@ export const ResizableImage = Node.create({
       width: {
         default: null,
       },
+      // Transient id stamped at insert time so an async CDN-URL swap can locate
+      // *this* image node reliably — matching on src breaks when two uploads
+      // share the same data URL (e.g. identical files). Cleared once swapped.
+      uploadId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-upload-id'),
+        renderHTML: (attributes) =>
+          attributes.uploadId ? { 'data-upload-id': attributes.uploadId } : {},
+      },
     };
   },
 
@@ -131,7 +140,7 @@ export const ResizableImage = Node.create({
   addCommands() {
     return {
       setImage:
-        (options: { src: string; alt?: string; title?: string; width?: number }) =>
+        (options: { src: string; alt?: string; title?: string; width?: number; uploadId?: string }) =>
         ({ commands }: { commands: { insertContent: (content: { type: string; attrs: typeof options }) => boolean } }) => {
           return commands.insertContent({
             type: this.name,
