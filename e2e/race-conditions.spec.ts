@@ -199,8 +199,11 @@ test.describe('Race Conditions - Image Upload', () => {
     // Wait for the image to land
     await expect(editor.locator('img')).toBeVisible({ timeout: 5000 })
 
-    // Continue typing (click editor first since upload may have changed focus)
-    await editor.click()
+    // Continue typing. Do NOT click the editor here: the freshly inserted image
+    // is a selected atom node, and a click landing on it keeps it selected so the
+    // next keystroke would REPLACE the image. ArrowRight deselects (cursor lands
+    // after the image) without that risk.
+    await page.keyboard.press('ArrowRight')
     await page.keyboard.type(' After image')
 
     // Both text and image should be present
@@ -228,8 +231,11 @@ test.describe('Race Conditions - Image Upload', () => {
       await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
       await expect(editor.locator('img')).toHaveCount(i + 1, { timeout: 5000 })
 
-      // Click editor to refocus for the next insertion
-      await editor.click()
+      // Deselect the just-inserted image with the keyboard (NOT a click, which
+      // can keep the atom node selected and let the next insert replace it) and
+      // open a fresh line for the next upload.
+      await page.keyboard.press('ArrowRight')
+      await page.keyboard.press('Enter')
     }
 
     // Should have 3 images

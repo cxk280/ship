@@ -377,8 +377,11 @@ test.describe('Performance - Many Images', () => {
     const imagePaths: string[] = []
 
     // Upload 5 images via the editor's persistent hidden input (see images.spec.ts).
+    // NOTE: do NOT click the editor mid-sequence — a freshly inserted image is a
+    // selected atom node, and a click that lands on it keeps it selected so the
+    // next Enter/typing/insert REPLACES it. Use keyboard-only navigation instead:
+    // ArrowRight deselects (cursor lands after the image), then Enter opens a line.
     for (let i = 0; i < 5; i++) {
-      await editor.click()
       await page.keyboard.type(`Image ${i + 1}:`)
       await page.keyboard.press('Enter')
 
@@ -387,18 +390,15 @@ test.describe('Performance - Many Images', () => {
       await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
       await expect(editor.locator('img')).toHaveCount(i + 1, { timeout: 10000 })
 
-      // Move below the image for the next iteration
-      await editor.click()
-      await page.keyboard.press('End')
+      // Deselect the image and open a fresh line for the next iteration
+      await page.keyboard.press('ArrowRight')
       await page.keyboard.press('Enter')
     }
 
     // All five images should be present
     await expect(editor.locator('img')).toHaveCount(5, { timeout: 10000 })
 
-    // Editor should still be usable
-    await editor.click()
-    await page.keyboard.press('End')
+    // Editor should still be usable (cursor is already on a clean line)
     await page.keyboard.type(' All images loaded!')
     await expect(editor).toContainText('All images loaded!')
 

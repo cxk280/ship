@@ -204,7 +204,9 @@ test.describe('Table of Contents (TOC)', () => {
     const tocOption = page.getByRole('button', { name: /Table of Contents/i })
     await expect(tocOption).toBeVisible({ timeout: 3000 })
     await tocOption.click()
-    await page.waitForTimeout(500)
+    // The slash-command menu (a tippy popup) must fully close before we touch the
+    // heading — otherwise it intercepts the click over the editor.
+    await expect(tocOption).toBeHidden({ timeout: 3000 })
 
     const toc = page.locator('[data-toc], .toc, .table-of-contents').first()
     await expect(toc).toBeVisible({ timeout: 3000 })
@@ -213,14 +215,10 @@ test.describe('Table of Contents (TOC)', () => {
     let tocText = await toc.textContent()
     expect(tocText).toContain('Original Title')
 
-    // Replace the heading text. Click directly into the heading and select its
-    // line with Home/Shift+End — cross-platform, and avoids the Meta+Arrow
-    // chords that no-op on the Linux CI runner (Meta = Super key there).
-    await page.keyboard.press('Escape')
-    const heading = editor.locator('h1').first()
-    await heading.click()
-    await page.keyboard.press('Home')
-    await page.keyboard.press('Shift+End')
+    // Rename the heading: triple-click selects the heading's line (same approach
+    // as the 'TOC updates when heading removed' test), then type to replace it.
+    const heading = editor.locator('h1').filter({ hasText: 'Original Title' })
+    await heading.click({ clickCount: 3 })
     await page.keyboard.type('New Title')
 
     // TOC should update reactively
