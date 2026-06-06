@@ -183,8 +183,7 @@ test.describe('Race Conditions - Image Upload', () => {
     await login(page)
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('image upload while typing does not interrupt editing', async ({ page }) => {
+  test('image upload while typing does not interrupt editing', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
@@ -193,29 +192,16 @@ test.describe('Race Conditions - Image Upload', () => {
     // Start typing
     await page.keyboard.type('Before image ')
 
-    // Trigger image upload via slash command
-    await page.keyboard.type('/image')
-    await page.waitForTimeout(500)
-
-    // Click the Image option specifically
-    const imageOption = page.getByRole('button', { name: /^Image Upload an image/i })
-    await expect(imageOption).toBeVisible({ timeout: 3000 })
-
+    // Drive the upload via the persistent hidden input (see images.spec.ts).
     const tmpPath = createTestImageFile()
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    await imageOption.click()
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
 
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(tmpPath)
+    // Wait for the image to land
+    await expect(editor.locator('img')).toBeVisible({ timeout: 5000 })
 
-    // Wait for upload to complete
-    await page.waitForTimeout(2000)
-
-    // Continue typing (click editor first since file chooser may have changed focus)
+    // Continue typing (click editor first since upload may have changed focus)
     await editor.click()
     await page.keyboard.type(' After image')
-
-    await page.waitForTimeout(1000)
 
     // Both text and image should be present
     await expect(editor).toContainText('Before image')
@@ -225,46 +211,29 @@ test.describe('Race Conditions - Image Upload', () => {
     fs.unlinkSync(tmpPath)
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('multiple image uploads in parallel', async ({ page }) => {
+  test('multiple image uploads in parallel', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
-    // Upload three images, one at a time
+    // Upload three identical images, one at a time. Identical files share a data
+    // URL, so this also exercises uploadId-based CDN swapping (Fix A).
     const tmpPaths: string[] = []
 
     for (let i = 0; i < 3; i++) {
-      await page.keyboard.type('/image')
-      await page.waitForTimeout(500)
-
-      // Click the Image option specifically
-      const imageOption = page.getByRole('button', { name: /^Image Upload an image/i })
-      await expect(imageOption).toBeVisible({ timeout: 3000 })
-
       const tmpPath = createTestImageFile()
       tmpPaths.push(tmpPath)
 
-      const fileChooserPromise = page.waitForEvent('filechooser')
-      await imageOption.click()
+      await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
+      await expect(editor.locator('img')).toHaveCount(i + 1, { timeout: 5000 })
 
-      const fileChooser = await fileChooserPromise
-      await fileChooser.setFiles(tmpPath)
-
-      // Wait for upload to complete before next one
-      await page.waitForTimeout(2000)
-
-      // Click editor to refocus
+      // Click editor to refocus for the next insertion
       await editor.click()
     }
 
-    // Wait for all uploads to complete
-    await page.waitForTimeout(2000)
-
     // Should have 3 images
-    const imgCount = await editor.locator('img').count()
-    expect(imgCount).toBe(3)
+    await expect(editor.locator('img')).toHaveCount(3, { timeout: 5000 })
 
     // Cleanup
     tmpPaths.forEach(p => fs.unlinkSync(p))

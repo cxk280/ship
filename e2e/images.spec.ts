@@ -57,28 +57,19 @@ function createTestImageFile(): string {
   return tmpPath;
 }
 
-// Helper to insert image via slash command and file picker
-async function insertImageViaSlashCommand(page: Page): Promise<void> {
+// Helper to insert an image into the editor.
+//
+// The editor mounts a persistent hidden <input data-testid="image-upload-input">.
+// Setting files on it directly drives the exact same upload path the /image slash
+// command triggers (handleImageUpload), without depending on the native
+// file-chooser dialog — which never fires in headless-Linux CI, so
+// page.waitForEvent('filechooser') used to time out at 60s there.
+async function insertImage(page: Page): Promise<void> {
   const editor = page.locator('.ProseMirror');
   await editor.click();
-  await page.waitForTimeout(300);
 
-  // Type /image to trigger slash command
-  await page.keyboard.type('/image');
-
-  // Wait for slash command menu
-  await page.waitForTimeout(500);
-
-  // Create test image file
   const tmpPath = createTestImageFile();
-
-  // Press Enter to select the Image option and wait for file chooser
-  const fileChooserPromise = page.waitForEvent('filechooser');
-  await page.keyboard.press('Enter');
-
-  // Handle file chooser
-  const fileChooser = await fileChooserPromise;
-  await fileChooser.setFiles(tmpPath);
+  await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath);
 
   // Cleanup temp file after a delay
   setTimeout(() => {
@@ -86,10 +77,7 @@ async function insertImageViaSlashCommand(page: Page): Promise<void> {
   }, 5000);
 }
 
-// FIXME: Filechooser event not firing - slash command image upload interaction broken
-// TODO(e2e-flake): quarantined whole suite — the native file chooser never opens
-// in CI (headless Linux); tests time out at 60s. Passes locally. Track + fix.
-test.describe.skip('Images', () => {
+test.describe('Images', () => {
   test.beforeEach(async ({ page }) => {
     // Login before each test
     await page.goto('/login');
@@ -117,7 +105,7 @@ test.describe.skip('Images', () => {
     await createNewDocument(page);
 
     // Insert image via slash command
-    await insertImageViaSlashCommand(page);
+    await insertImage(page);
 
     // Wait for image to appear (data URL preview should show immediately)
     const editor = page.locator('.ProseMirror');
@@ -128,7 +116,7 @@ test.describe.skip('Images', () => {
     await createNewDocument(page);
 
     // Insert image via slash command
-    await insertImageViaSlashCommand(page);
+    await insertImage(page);
 
     // Wait for image to appear
     const editor = page.locator('.ProseMirror');
@@ -172,7 +160,7 @@ test.describe.skip('Images', () => {
     await createNewDocument(page);
 
     // Insert image
-    await insertImageViaSlashCommand(page);
+    await insertImage(page);
 
     const editor = page.locator('.ProseMirror');
 
@@ -219,20 +207,9 @@ test.describe.skip('Images', () => {
     // Go offline - block all network requests
     await context.setOffline(true);
 
-    // Type /image to trigger slash command
-    await page.keyboard.type('/image');
-    await page.waitForTimeout(500);
-
-    // Create test image file
+    // Drive the upload via the persistent hidden input (see insertImage helper).
     const tmpPath = createTestImageFile();
-
-    // Press Enter to select the Image option and wait for file chooser
-    const fileChooserPromise = page.waitForEvent('filechooser');
-    await page.keyboard.press('Enter');
-
-    // Handle file chooser
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(tmpPath);
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath);
 
     // Wait for image to appear (should show data URL preview)
     const img = editor.locator('img').first();
@@ -264,7 +241,7 @@ test.describe.skip('Images', () => {
     await createNewDocument(page);
 
     // Insert image
-    await insertImageViaSlashCommand(page);
+    await insertImage(page);
 
     // Wait for upload to complete
     await page.waitForFunction(
@@ -313,7 +290,7 @@ test.describe.skip('Images', () => {
     await createNewDocument(page);
 
     // Insert image via slash command
-    await insertImageViaSlashCommand(page);
+    await insertImage(page);
 
     // Wait for image to appear
     const editor = page.locator('.ProseMirror');

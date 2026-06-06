@@ -297,8 +297,7 @@ test.describe('Drag Handle - Block Reordering', () => {
   })
 
   test.describe('Content Preservation', () => {
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-    test.fixme('drag preserves full paragraph content', async ({ page }) => {
+    test('drag preserves full paragraph content', async ({ page }) => {
       await createNewDocument(page)
       const longContent = 'This is a longer paragraph with multiple words and some special chars: @#$%'
       await addParagraphs(page, [longContent, 'Second block'])

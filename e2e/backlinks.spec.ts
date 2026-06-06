@@ -107,8 +107,7 @@ test.describe('Backlinks', () => {
     expect(hasDocB).toBeTruthy()
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('removing mention removes backlink', async ({ page }) => {
+  test('removing mention removes backlink', async ({ page }) => {
     // Create Document A (will be mentioned)
     const docAUrl = await createNewDocument(page)
     await setDocumentTitle(page, 'Doc to Mention')
@@ -135,9 +134,11 @@ test.describe('Backlinks', () => {
     const mention = editor.locator('.mention')
     await expect(mention).toBeVisible({ timeout: 3000 })
 
-    // Focus the editor and select all content
+    // Focus the editor and select all content. ControlOrMeta maps to Cmd on
+    // macOS and Ctrl on the Linux CI runner — a bare Meta+a is a no-op there, so
+    // the mention was never deleted and the backlink (wrongly) survived.
     await editor.click()
-    await page.keyboard.press('Meta+a') // Select all (Cmd+A on Mac)
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.press('Backspace') // Delete selected content
 
     // Wait for editor update to propagate (debounce is 500ms)
@@ -292,8 +293,7 @@ test.describe('Backlinks', () => {
     expect(title).toBe('Source Doc')
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('backlinks update in real-time', async ({ page, browser }) => {
+  test('backlinks update in real-time', async ({ page, browser }) => {
     // Create Document P (will be mentioned)
     const docPUrl = await createNewDocument(page)
     await setDocumentTitle(page, 'Real-time Doc')
@@ -337,12 +337,13 @@ test.describe('Backlinks', () => {
     await expect(docOption).toBeVisible({ timeout: 5000 })
     await docOption.click()
 
-    // Wait for sync to complete in page2
+    // The backlink is created by the debounced /links POST (not the title PATCH),
+    // so wait for THAT to commit before reading backlinks from the other tab.
     await page2.waitForResponse(
-      resp => resp.url().includes('/api/documents/') && resp.request().method() === 'PATCH',
-      { timeout: 5000 }
-    ).catch(() => {}) // Ignore if no response
-    await page2.waitForTimeout(2000)
+      resp => resp.url().includes('/links') && resp.request().method() === 'POST',
+      { timeout: 8000 }
+    ).catch(() => {})
+    await page2.waitForTimeout(1000)
 
     // In page1 (Document P), check if backlinks updated
     await page.goto(docPUrl)

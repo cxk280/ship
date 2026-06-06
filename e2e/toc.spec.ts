@@ -186,8 +186,7 @@ test.describe('Table of Contents (TOC)', () => {
     expect(tocText).toContain('Keep This Too')
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('TOC updates when heading renamed', async ({ page }) => {
+  test('TOC updates when heading renamed', async ({ page }) => {
     await createNewDocument(page)
 
     // Add heading
@@ -214,31 +213,19 @@ test.describe('Table of Contents (TOC)', () => {
     let tocText = await toc.textContent()
     expect(tocText).toContain('Original Title')
 
-    // Use purely keyboard-based approach to avoid inline comment overlay issues
-    // The cursor is currently in the editor after TOC insertion
-    // First dismiss any tooltips/menus
+    // Replace the heading text. Click directly into the heading and select its
+    // line with Home/Shift+End — cross-platform, and avoids the Meta+Arrow
+    // chords that no-op on the Linux CI runner (Meta = Super key there).
     await page.keyboard.press('Escape')
-    await page.waitForTimeout(300)
-
-    // Go to the very start of the document (above TOC, into heading)
-    await page.keyboard.press('Meta+ArrowUp')
-    await page.waitForTimeout(100)
-    // Select the entire first line (the heading text)
-    await page.keyboard.press('Shift+Meta+ArrowDown')
-    await page.waitForTimeout(100)
-    // Now type replacement - but Shift+Meta+ArrowDown may select too much
-    // Instead, select just to end of current line
-    await page.keyboard.press('Meta+ArrowUp')  // Reset to start
-    await page.waitForTimeout(100)
-    await page.keyboard.press('Meta+Shift+ArrowRight')  // Select to end of line
-    await page.waitForTimeout(100)
+    const heading = editor.locator('h1').first()
+    await heading.click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Shift+End')
     await page.keyboard.type('New Title')
-    await page.waitForTimeout(1000)
 
-    // TOC should update
-    tocText = await toc.textContent()
-    expect(tocText).toContain('New Title')
-    expect(tocText).not.toContain('Original Title')
+    // TOC should update reactively
+    await expect(toc).toContainText('New Title', { timeout: 5000 })
+    await expect(toc).not.toContainText('Original Title')
   })
 
   test('clicking TOC item scrolls to heading', async ({ page }) => {

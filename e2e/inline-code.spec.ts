@@ -66,41 +66,32 @@ test.describe('Inline Code', () => {
     await expect(codeElement).toContainText('inline code');
   });
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('should toggle inline code with Cmd/Ctrl+E', async ({ page }) => {
+  test('should toggle inline code with Cmd/Ctrl+E', async ({ page }) => {
     await createNewDocument(page);
 
     const editor = page.locator('.ProseMirror');
     await editor.click();
-    await page.waitForTimeout(300);
 
     // Type some text
     await page.keyboard.type('format this');
 
-    // Select the text (Cmd+A or Ctrl+A)
-    await page.keyboard.press('Meta+a'); // Use Meta for Mac, Control for Windows/Linux
+    // Select the text. ControlOrMeta maps to Cmd on macOS and Ctrl on Linux/CI —
+    // a plain Meta+ shortcut is a no-op on the Linux CI runner (Meta = Super key).
+    await page.keyboard.press('ControlOrMeta+a');
 
-    // Wait a moment
-    await page.waitForTimeout(200);
+    // Toggle code on
+    await page.keyboard.press('ControlOrMeta+e');
 
-    // Press Cmd+E or Ctrl+E to toggle code
-    await page.keyboard.press('Meta+e');
-
-    // Wait for formatting
-    await page.waitForTimeout(300);
-
-    // Should have code element
+    // Should have code element (assertion auto-retries — no fixed sleep needed)
     const codeElement = editor.locator('code');
     await expect(codeElement).toBeVisible({ timeout: 3000 });
     await expect(codeElement).toContainText('format this');
 
-    // Press Cmd+E again to remove formatting
-    await page.keyboard.press('Meta+e');
-    await page.waitForTimeout(300);
+    // Toggle code off again
+    await page.keyboard.press('ControlOrMeta+e');
 
     // Code element should be gone (text should still exist)
-    const codeCount = await editor.locator('code').count();
-    expect(codeCount).toBe(0);
+    await expect(editor.locator('code')).toHaveCount(0, { timeout: 3000 });
     await expect(editor).toContainText('format this');
   });
 

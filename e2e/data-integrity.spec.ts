@@ -57,6 +57,14 @@ function createTestImageFile(): string {
   return tmpPath
 }
 
+// Insert an image at the current cursor via the editor's persistent hidden
+// <input data-testid="image-upload-input"> (see images.spec.ts for why this is
+// reliable in headless CI where the native file-chooser never fires). Does not
+// move the selection, so callers control where the image lands.
+async function insertImage(page: Page, tmpPath: string): Promise<void> {
+  await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
+}
+
 test.describe('Data Integrity - Document Persistence', () => {
   test.beforeEach(async ({ page }) => {
     await login(page)
@@ -197,30 +205,20 @@ test.describe('Data Integrity - Document Persistence', () => {
 
 })
 
-// FIXME: Filechooser event not firing - slash command image upload interaction broken
-// Same issue as images.spec.ts - see that file for context
 test.describe('Data Integrity - Images', () => {
   test.beforeEach(async ({ page }) => {
     await login(page)
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('images persist after page reload', async ({ page }) => {
+  test('images persist after page reload', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
     // Upload image
-    await page.keyboard.type('/image')
-    await page.waitForTimeout(500)
-
     const tmpPath = createTestImageFile()
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    await page.keyboard.press('Enter')
-
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(tmpPath)
+    await insertImage(page, tmpPath)
 
     // Wait for upload
     await expect(editor.locator('img')).toBeVisible({ timeout: 5000 })
@@ -255,63 +253,59 @@ test.describe('Data Integrity - Images', () => {
     fs.unlinkSync(tmpPath)
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('multiple images persist in correct order', async ({ page }) => {
+  test('multiple images persist in correct order', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
-    // Upload first image
+    // Note: createTestImageFile() always writes the SAME 1x1 PNG, so both uploads
+    // share an identical data URL. The CDN-URL swap therefore MUST locate nodes by
+    // uploadId, not by src — this test guards that (Fix A in ImageUpload.tsx).
+
+    // Insert first image after a label
     await page.keyboard.type('Image 1:')
     await page.keyboard.press('Enter')
-    await page.keyboard.type('/image')
-    await page.waitForTimeout(500)
-
     const tmpPath1 = createTestImageFile()
-    let fileChooserPromise = page.waitForEvent('filechooser')
-    await page.keyboard.press('Enter')
-    let fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(tmpPath1)
+    await insertImage(page, tmpPath1)
+    await expect(editor.locator('img')).toHaveCount(1, { timeout: 5000 })
 
-    await page.waitForTimeout(2000)
-
-    // Upload second image
+    // Move past the first image and insert a second after another label
     await page.keyboard.press('End')
     await page.keyboard.press('Enter')
     await page.keyboard.type('Image 2:')
     await page.keyboard.press('Enter')
-    await page.keyboard.type('/image')
-    await page.waitForTimeout(500)
-
     const tmpPath2 = createTestImageFile()
-    fileChooserPromise = page.waitForEvent('filechooser')
-    await page.keyboard.press('Enter')
-    fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(tmpPath2)
+    await insertImage(page, tmpPath2)
+    await expect(editor.locator('img')).toHaveCount(2, { timeout: 5000 })
 
-    await page.waitForTimeout(3000)
+    // Wait for BOTH uploads to swap their data URL for a CDN URL
+    await expect(async () => {
+      const srcs = await editor.locator('img').evaluateAll(
+        (els) => els.map((el) => el.getAttribute('src') || '')
+      )
+      expect(srcs.length).toBe(2)
+      for (const src of srcs) {
+        expect(src.startsWith('http') || src.includes('/api/files')).toBe(true)
+      }
+    }).toPass({ timeout: 20000 })
 
-    // Get image sources
-    const imgs = await editor.locator('img').all()
-    expect(imgs.length).toBe(2)
+    const srcsBefore = await editor.locator('img').evaluateAll(
+      (els) => els.map((el) => el.getAttribute('src') || '')
+    )
+    // Distinct files on the server → distinct CDN URLs, so order is verifiable.
+    expect(srcsBefore[0]).not.toBe(srcsBefore[1])
 
-    const src1 = await imgs[0].getAttribute('src')
-    const src2 = await imgs[1].getAttribute('src')
-
-    // Reload
+    // Wait for Yjs sync, then reload and verify both images persist in order
+    await page.waitForTimeout(2000)
     await page.reload()
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 5000 })
+    await expect(page.locator('.ProseMirror img')).toHaveCount(2, { timeout: 10000 })
 
-    // Verify order preserved
-    const reloadedImgs = await page.locator('.ProseMirror img').all()
-    expect(reloadedImgs.length).toBe(2)
-
-    const reloadedSrc1 = await reloadedImgs[0].getAttribute('src')
-    const reloadedSrc2 = await reloadedImgs[1].getAttribute('src')
-
-    expect(reloadedSrc1).toBe(src1)
-    expect(reloadedSrc2).toBe(src2)
+    const srcsAfter = await page.locator('.ProseMirror img').evaluateAll(
+      (els) => els.map((el) => el.getAttribute('src') || '')
+    )
+    expect(srcsAfter).toEqual(srcsBefore)
 
     fs.unlinkSync(tmpPath1)
     fs.unlinkSync(tmpPath2)
@@ -356,8 +350,7 @@ test.describe('Data Integrity - Mentions', () => {
     }
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('multiple mentions persist correctly', async ({ page }) => {
+  test('multiple mentions persist correctly', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
@@ -367,39 +360,34 @@ test.describe('Data Integrity - Mentions', () => {
     await page.keyboard.type('First: ')
     await page.keyboard.type('@')
     await expect(page.locator('[role="listbox"]')).toBeVisible({ timeout: 5000 })
-
-    let options = await page.locator('[role="option"]').all()
-    if (options.length > 0) {
-      await options[0].click()
-      await page.waitForTimeout(500)
-    }
+    const firstOptions = page.locator('[role="option"]')
+    await expect(
+      firstOptions.first(),
+      'Mention popup should offer at least one target. Run: pnpm db:seed'
+    ).toBeVisible({ timeout: 5000 })
+    await firstOptions.first().click()
+    await expect(editor.locator('.mention')).toHaveCount(1, { timeout: 3000 })
 
     // Insert second mention
     await page.keyboard.type(' Second: ')
     await page.keyboard.type('@')
     await expect(page.locator('[role="listbox"]')).toBeVisible({ timeout: 5000 })
+    const secondOptions = page.locator('[role="option"]')
+    await expect(secondOptions.first()).toBeVisible({ timeout: 5000 })
+    const optionCount = await secondOptions.count()
+    await secondOptions.nth(optionCount > 1 ? 1 : 0).click()
+    await expect(editor.locator('.mention')).toHaveCount(2, { timeout: 3000 })
 
-    options = await page.locator('[role="option"]').all()
-    if (options.length > 1) {
-      await options[1].click()
-      await page.waitForTimeout(500)
-    } else if (options.length > 0) {
-      await options[0].click()
-      await page.waitForTimeout(500)
-    }
+    // Wait for the document to actually save before reloading
+    await expect(
+      page.getByTestId('sync-status').getByText(/Saved|Cached/)
+    ).toBeVisible({ timeout: 10000 })
+    await page.waitForTimeout(1000)
 
-    // Wait for save
-    await page.waitForTimeout(2000)
-
-    const mentionCount = await editor.locator('.mention').count()
-
-    // Reload
+    // Reload — both mentions must survive (guards the rapid multi-insert path)
     await page.reload()
     await expect(page.locator('.ProseMirror')).toBeVisible({ timeout: 5000 })
-
-    // Same number of mentions should exist
-    const reloadedMentionCount = await page.locator('.ProseMirror .mention').count()
-    expect(reloadedMentionCount).toBe(mentionCount)
+    await expect(page.locator('.ProseMirror .mention')).toHaveCount(2, { timeout: 10000 })
   })
 })
 

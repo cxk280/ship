@@ -156,30 +156,19 @@ test.describe('TIER 1: Image Upload - REAL TESTS', () => {
   test('can upload image via /image command', async ({ page }) => {
     await loginAndCreateDoc(page);
 
-    // Use /image command
-    await page.keyboard.type('/image');
-    await page.waitForTimeout(500);
-    await page.keyboard.press('Enter');
+    // Drive the upload via the editor's persistent hidden input (see images.spec.ts).
+    const testImage = createTestImage();
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(testImage);
 
-    // File chooser should appear
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5000 }),
-    ]).catch(() => [null]);
+    // Wait for image to appear
+    const img = page.locator('.tiptap img');
+    await expect(img.first()).toBeVisible({ timeout: 30000 });
 
-    if (fileChooser) {
-      const testImage = createTestImage();
-      await fileChooser.setFiles(testImage);
-
-      // Wait for image to appear
-      const img = page.locator('.tiptap img');
-      await expect(img.first()).toBeVisible({ timeout: 30000 });
-
-      // Verify image actually loaded (naturalWidth > 0)
-      const loaded = await img.first().evaluate((el: HTMLImageElement) =>
-        el.complete && el.naturalWidth > 0
-      );
-      expect(loaded).toBe(true);
-    }
+    // Verify image actually loaded (naturalWidth > 0)
+    const loaded = await img.first().evaluate((el: HTMLImageElement) =>
+      el.complete && el.naturalWidth > 0
+    );
+    expect(loaded).toBe(true);
   });
 
   test('uploaded image persists after page reload', async ({ page }) => {
@@ -188,31 +177,21 @@ test.describe('TIER 1: Image Upload - REAL TESTS', () => {
     // Get current URL to return to
     const docUrl = page.url();
 
-    // Upload image
-    await page.keyboard.type('/image');
-    await page.waitForTimeout(500);
-    await page.keyboard.press('Enter');
+    // Upload image via the persistent hidden input (see images.spec.ts)
+    const testImage = createTestImage();
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(testImage);
 
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5000 }),
-    ]).catch(() => [null]);
+    // Wait for upload
+    await page.waitForSelector('.tiptap img', { timeout: 30000 });
+    await page.waitForTimeout(2000); // Wait for save
 
-    if (fileChooser) {
-      const testImage = createTestImage();
-      await fileChooser.setFiles(testImage);
+    // Reload page
+    await page.reload();
+    await page.waitForSelector('.tiptap', { timeout: 10000 });
 
-      // Wait for upload
-      await page.waitForSelector('.tiptap img', { timeout: 30000 });
-      await page.waitForTimeout(2000); // Wait for save
-
-      // Reload page
-      await page.reload();
-      await page.waitForSelector('.tiptap', { timeout: 10000 });
-
-      // Image should still be there
-      const img = page.locator('.tiptap img');
-      await expect(img.first()).toBeVisible({ timeout: 10000 });
-    }
+    // Image should still be there
+    const img = page.locator('.tiptap img');
+    await expect(img.first()).toBeVisible({ timeout: 10000 });
   });
 
   test('image is not blocked by CORS (no console errors)', async ({ page }) => {
@@ -232,21 +211,15 @@ test.describe('TIER 1: Image Upload - REAL TESTS', () => {
     });
 
     await loginAndCreateDoc(page);
-    await page.keyboard.type('/image');
-    await page.keyboard.press('Enter');
 
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5000 }),
-    ]).catch(() => [null]);
+    // Upload image via the persistent hidden input (see images.spec.ts)
+    const testImage = createTestImage();
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(testImage);
+    await page.waitForSelector('.tiptap img', { timeout: 30000 });
+    await page.waitForTimeout(3000);
 
-    if (fileChooser) {
-      const testImage = createTestImage();
-      await fileChooser.setFiles(testImage);
-      await page.waitForTimeout(5000);
-
-      expect(consoleErrors).toHaveLength(0);
-      expect(failedRequests).toHaveLength(0);
-    }
+    expect(consoleErrors).toHaveLength(0);
+    expect(failedRequests).toHaveLength(0);
   });
 });
 
@@ -258,33 +231,21 @@ test.describe('TIER 2: File Attachments - REAL TESTS', () => {
   test('can attach PDF via /file command', async ({ page }) => {
     await loginAndCreateDoc(page);
 
-    await page.keyboard.type('/file');
-    await page.waitForTimeout(500);
-    await page.keyboard.press('Enter');
-
-    const [fileChooser] = await Promise.all([
-      page.waitForEvent('filechooser', { timeout: 5000 }),
-    ]).catch(() => [null]);
-
-    if (fileChooser) {
-      // Create fixtures directory and test file
-      const fixturesDir = path.join(__dirname, 'fixtures');
-      if (!fs.existsSync(fixturesDir)) {
-        fs.mkdirSync(fixturesDir, { recursive: true });
-      }
-      const testFilePath = path.join(fixturesDir, 'test.pdf');
-      if (!fs.existsSync(testFilePath)) {
-        fs.writeFileSync(testFilePath, '%PDF-1.4 test file');
-      }
-
-      await fileChooser.setFiles(testFilePath);
-      await page.waitForTimeout(3000);
-
-      // Should show file attachment node
-      const attachment = page.locator('[data-type="fileAttachment"], .file-attachment');
-      const count = await attachment.count();
-      expect(count).toBeGreaterThan(0);
+    // Create fixtures directory and test file
+    const fixturesDir = path.join(__dirname, 'fixtures');
+    if (!fs.existsSync(fixturesDir)) {
+      fs.mkdirSync(fixturesDir, { recursive: true });
     }
+    const testFilePath = path.join(fixturesDir, 'test.pdf');
+    if (!fs.existsSync(testFilePath)) {
+      fs.writeFileSync(testFilePath, '%PDF-1.4 test file');
+    }
+
+    // Drive the upload via the persistent hidden input (see file-attachments.spec.ts)
+    await page.locator('[data-testid="file-upload-input"]').setInputFiles(testFilePath);
+
+    // Should show file attachment node
+    await expect(page.locator('[data-file-attachment]').first()).toBeVisible({ timeout: 10000 });
   });
 });
 

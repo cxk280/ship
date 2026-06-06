@@ -145,23 +145,15 @@ test.describe('Security - XSS Prevention', () => {
     expect(buttons.length).toBe(0)
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('XSS in image alt text is escaped', async ({ page }) => {
+  test('XSS in image alt text is escaped', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
-    // Type /image to trigger slash command
-    await page.keyboard.type('/image')
-
-    // Wait for slash command menu to appear with Image option
-    const imageOption = page.locator('button', { hasText: 'Image' }).filter({ hasText: 'Upload' })
-    await expect(imageOption).toBeVisible({ timeout: 3000 })
-
-    // Create test image with XSS payload encoded in filename (filesystem-safe)
-    // The original payload: test"><script>alert("XSS")</script><img src="x
-    // We use a safe filename and verify XSS doesn't execute when title contains XSS
+    // Create test image with XSS payload encoded in filename (filesystem-safe).
+    // The image alt/title are derived from the filename, so a hostile filename is
+    // the realistic injection vector we want to prove is neutralized.
     const timestamp = Date.now()
     const safeFilename = `xss-test-${timestamp}.png`
     const pngBuffer = Buffer.from(
@@ -171,12 +163,8 @@ test.describe('Security - XSS Prevention', () => {
     const tmpPath = path.join(os.tmpdir(), safeFilename)
     fs.writeFileSync(tmpPath, pngBuffer)
 
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    // Click the Image option in slash command menu
-    await imageOption.click()
-
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(tmpPath)
+    // Drive the upload via the editor's persistent hidden input (see images.spec.ts).
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(tmpPath)
 
     // Wait for image to appear
     await expect(editor.locator('img')).toBeVisible({ timeout: 5000 })
@@ -239,7 +227,6 @@ test.describe('Security - XSS Prevention', () => {
   })
 })
 
-// FIXME: File upload via slash command UI has changed
 test.describe('Security - File Upload Validation', () => {
   test.beforeEach(async ({ page }) => {
     await login(page)
@@ -251,23 +238,12 @@ test.describe('Security - File Upload Validation', () => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
-    // Type /image to trigger slash command
-    await page.keyboard.type('/image')
-
-    // Wait for slash command menu with Image option
-    const imageOption = page.locator('button', { hasText: 'Image' }).filter({ hasText: 'Upload' })
-    await expect(imageOption).toBeVisible({ timeout: 3000 })
-
     // Create a fake "image" that's actually HTML
     const htmlFile = path.join(os.tmpdir(), `fake-image-${Date.now()}.png`)
     fs.writeFileSync(htmlFile, '<html><script>alert("XSS")</script></html>')
 
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    // Click the Image option in slash command menu
-    await imageOption.click()
-
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(htmlFile)
+    // Drive upload via the persistent hidden input (see images.spec.ts)
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(htmlFile)
 
     // Wait to see if upload is rejected or accepted
     await page.waitForTimeout(2000)
@@ -303,25 +279,14 @@ test.describe('Security - File Upload Validation', () => {
     const editor = page.locator('.ProseMirror')
     await editor.click()
 
-    // Type /image to trigger slash command
-    await page.keyboard.type('/image')
-
-    // Wait for slash command menu with Image option
-    const imageOption = page.locator('button', { hasText: 'Image' }).filter({ hasText: 'Upload' })
-    await expect(imageOption).toBeVisible({ timeout: 3000 })
-
     // Try to upload a .exe file (renamed as .png)
     const timestamp = Date.now()
     const exeFile = path.join(os.tmpdir(), `malware-${timestamp}.png`)
     // MZ header indicates Windows executable
     fs.writeFileSync(exeFile, Buffer.from([0x4D, 0x5A, 0x90, 0x00]))
 
-    const fileChooserPromise = page.waitForEvent('filechooser')
-    // Click the Image option in slash command menu
-    await imageOption.click()
-
-    const fileChooser = await fileChooserPromise
-    await fileChooser.setFiles(exeFile)
+    // Drive upload via the persistent hidden input (see images.spec.ts)
+    await page.locator('[data-testid="image-upload-input"]').setInputFiles(exeFile)
 
     await page.waitForTimeout(2000)
 
