@@ -186,8 +186,7 @@ test.describe('Table of Contents (TOC)', () => {
     expect(tocText).toContain('Keep This Too')
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('TOC updates when heading renamed', async ({ page }) => {
+  test('TOC updates when heading renamed', async ({ page }) => {
     await createNewDocument(page)
 
     // Add heading
@@ -205,7 +204,9 @@ test.describe('Table of Contents (TOC)', () => {
     const tocOption = page.getByRole('button', { name: /Table of Contents/i })
     await expect(tocOption).toBeVisible({ timeout: 3000 })
     await tocOption.click()
-    await page.waitForTimeout(500)
+    // The slash-command menu (a tippy popup) must fully close before we touch the
+    // heading — otherwise it intercepts the click over the editor.
+    await expect(tocOption).toBeHidden({ timeout: 3000 })
 
     const toc = page.locator('[data-toc], .toc, .table-of-contents').first()
     await expect(toc).toBeVisible({ timeout: 3000 })
@@ -214,31 +215,15 @@ test.describe('Table of Contents (TOC)', () => {
     let tocText = await toc.textContent()
     expect(tocText).toContain('Original Title')
 
-    // Use purely keyboard-based approach to avoid inline comment overlay issues
-    // The cursor is currently in the editor after TOC insertion
-    // First dismiss any tooltips/menus
-    await page.keyboard.press('Escape')
-    await page.waitForTimeout(300)
-
-    // Go to the very start of the document (above TOC, into heading)
-    await page.keyboard.press('Meta+ArrowUp')
-    await page.waitForTimeout(100)
-    // Select the entire first line (the heading text)
-    await page.keyboard.press('Shift+Meta+ArrowDown')
-    await page.waitForTimeout(100)
-    // Now type replacement - but Shift+Meta+ArrowDown may select too much
-    // Instead, select just to end of current line
-    await page.keyboard.press('Meta+ArrowUp')  // Reset to start
-    await page.waitForTimeout(100)
-    await page.keyboard.press('Meta+Shift+ArrowRight')  // Select to end of line
-    await page.waitForTimeout(100)
+    // Rename the heading: triple-click selects the heading's line (same approach
+    // as the 'TOC updates when heading removed' test), then type to replace it.
+    const heading = editor.locator('h1').filter({ hasText: 'Original Title' })
+    await heading.click({ clickCount: 3 })
     await page.keyboard.type('New Title')
-    await page.waitForTimeout(1000)
 
-    // TOC should update
-    tocText = await toc.textContent()
-    expect(tocText).toContain('New Title')
-    expect(tocText).not.toContain('Original Title')
+    // TOC should update reactively
+    await expect(toc).toContainText('New Title', { timeout: 5000 })
+    await expect(toc).not.toContainText('Original Title')
   })
 
   test('clicking TOC item scrolls to heading', async ({ page }) => {

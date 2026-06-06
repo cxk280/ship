@@ -372,8 +372,7 @@ test.describe('Tables', () => {
     await expect(table).toContainText('TABLE_CONTENT');
   });
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('should delete entire table', async ({ page }) => {
+  test('should delete entire table', async ({ page }) => {
     await createNewDocument(page);
 
     const editor = page.locator('.ProseMirror');
@@ -407,7 +406,7 @@ test.describe('Tables', () => {
       await expect(table).toBeHidden({ timeout: 3000 });
     } else {
       // Alternative: Select table and press Delete/Backspace
-      await page.keyboard.press('Meta+a'); // Select all in table
+      await page.keyboard.press('ControlOrMeta+a'); // Select all in table (cross-platform)
       await page.keyboard.press('Backspace');
       await page.waitForTimeout(300);
 

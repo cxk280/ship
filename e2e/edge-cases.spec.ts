@@ -343,8 +343,7 @@ test.describe('Edge Cases', () => {
     await expect(editor).toContainText('🎉', { timeout: 3000 })
   })
 
-  // TODO(e2e-flake): quarantined — fails only in CI (timing/persistence), passes locally. Track + re-enable.
-  test.fixme('handles simultaneous formatting operations', async ({ page }) => {
+  test('handles simultaneous formatting operations', async ({ page }) => {
     await createNewDocument(page)
 
     const editor = page.locator('.ProseMirror')
@@ -353,19 +352,13 @@ test.describe('Edge Cases', () => {
     // Type text
     await page.keyboard.type('Bold and italic text')
 
-    // Select all
-    await page.keyboard.press('Meta+a')
+    // Select all, then apply bold + italic. ControlOrMeta maps to Cmd on macOS
+    // and Ctrl on the Linux CI runner (a bare Meta+ chord no-ops there).
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.press('ControlOrMeta+b')
+    await page.keyboard.press('ControlOrMeta+i')
 
-    // Apply bold
-    await page.keyboard.press('Meta+b')
-
-    // Apply italic
-    await page.keyboard.press('Meta+i')
-
-    // Wait for formatting to apply
-    await page.waitForTimeout(500)
-
-    // Verify both formats are applied
+    // Verify both formats are applied (assertions auto-retry — no fixed sleep)
     const strongTag = editor.locator('strong')
     const emTag = editor.locator('em, i')
 

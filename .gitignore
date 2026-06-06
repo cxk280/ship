@@ -114,3 +114,6 @@ vendor/
 
 # Vite PWA dev artifacts
 web/dev-dist/
+
+# Claude Code agent worktrees (local only)
+.claude/worktrees/

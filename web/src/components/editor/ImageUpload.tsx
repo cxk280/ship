@@ -3,7 +3,6 @@
  * Handles paste/drop events for images and manages upload flow
  */
 import { Extension } from '@tiptap/core';
-import { clickFileInput } from './clickFileInput';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Editor } from '@tiptap/react';
@@ -30,7 +29,18 @@ export interface ImageUploadOptions {
   abortController?: AbortController;
 }
 
-export const ImageUploadExtension = Extension.create<ImageUploadOptions>({
+export interface ImageUploadStorage {
+  /**
+   * Opens the image file picker. Wired up by the Editor component to click a
+   * persistent hidden <input> (see Editor.tsx). Null until the editor mounts.
+   * Using a persistent, DOM-attached input lets E2E tests drive uploads via
+   * Playwright's setInputFiles() instead of the native file-chooser dialog,
+   * which never fires in headless-Linux CI.
+   */
+  triggerPicker: (() => void) | null;
+}
+
+export const ImageUploadExtension = Extension.create<ImageUploadOptions, ImageUploadStorage>({
   name: 'imageUpload',
 
   addOptions() {
@@ -39,6 +49,12 @@ export const ImageUploadExtension = Extension.create<ImageUploadOptions>({
       onUploadComplete: undefined,
       onUploadError: undefined,
       abortController: undefined,
+    };
+  },
+
+  addStorage() {
+    return {
+      triggerPicker: null,
     };
   },
 
@@ -93,9 +109,11 @@ export const ImageUploadExtension = Extension.create<ImageUploadOptions>({
 });
 
 /**
- * Handle image upload and insertion into editor
+ * Handle image upload and insertion into editor.
+ * Used by paste/drop (the ProseMirror plugin above) and by the persistent
+ * file <input> mounted in the Editor component.
  */
-async function handleImageUpload(
+export async function handleImageUpload(
   editor: Editor,
   file: File,
   options: ImageUploadOptions
@@ -121,7 +139,9 @@ async function handleImageUpload(
     return;
   }
 
-  // Insert image with data URL for immediate preview
+  // Insert image with data URL for immediate preview. Stamp the uploadId so the
+  // async CDN-URL swap below can find THIS node — even if another in-flight image
+  // happens to share the same data URL (identical files produce identical URLs).
   editor
     .chain()
     .focus()
@@ -129,6 +149,7 @@ async function handleImageUpload(
       src: dataUrl,
       alt: file.name,
       title: file.name,
+      uploadId,
     })
     .run();
 
@@ -149,15 +170,16 @@ async function handleImageUpload(
       return;
     }
 
-    // Replace the data URL with the CDN URL
-    // Find and update the image node with matching src
+    // Replace the data URL with the CDN URL.
+    // Find this upload's image node by its uploadId (not by src — identical files
+    // share a data URL, so a src match could hit the wrong node).
     const { state, view } = editor;
     const { doc } = state;
 
     let imagePos: number | null = null;
 
     doc.descendants((node: ProseMirrorNode, pos: number) => {
-      if (node.type.name === 'image' && node.attrs.src === dataUrl) {
+      if (node.type.name === 'image' && node.attrs.uploadId === uploadId) {
         imagePos = pos;
         return false; // Stop searching
       }
@@ -165,12 +187,12 @@ async function handleImageUpload(
     });
 
     if (imagePos !== null) {
-      // Update the image src to CDN URL
+      // Update the image src to CDN URL and clear the transient uploadId.
+      // Relative URLs work via the Vite proxy.
       const transaction = state.tr.setNodeMarkup(imagePos, undefined, {
         ...doc.nodeAt(imagePos)?.attrs,
-        src: result.cdnUrl.startsWith('http')
-          ? result.cdnUrl
-          : result.cdnUrl, // Relative URLs work via Vite proxy
+        src: result.cdnUrl,
+        uploadId: null,
       });
       view.dispatch(transaction);
     }
@@ -207,35 +229,4 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-/**
- * Trigger file picker for image upload
- */
-export function triggerImageUpload(
-  editor: Editor,
-  options: ImageUploadOptions = {}
-) {
-  // Check if already aborted
-  if (options.abortController?.signal?.aborted) {
-    return;
-  }
-
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.multiple = true;
-
-  input.onchange = () => {
-    // Check again in case it was aborted while file picker was open
-    if (options.abortController?.signal?.aborted) {
-      return;
-    }
-    const files = Array.from(input.files || []);
-    files.forEach((file) => {
-      handleImageUpload(editor, file, options);
-    });
-  };
-
-  clickFileInput(input);
 }
